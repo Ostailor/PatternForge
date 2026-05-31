@@ -1,12 +1,14 @@
 {
-  "name": "patternforge-tmp",
-  "version": "0.1.0",
+  "name": "patternforge",
+  "version": "0.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit --pretty false"
   },
   "dependencies": {
     "next": "16.2.6",

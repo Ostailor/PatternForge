@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PatternForge
 
-## Getting Started
+PatternForge v0.0 is a local-only MVP prototype for learning coding interview
+patterns through gamified practice. It helps users practice recognizing the
+underlying pattern before solving, then reflect on what worked.
 
-First, run the development server:
+The app is built with Next.js, TypeScript, and Tailwind CSS.
+
+## What v0.0 Includes
+
+- Dashboard with local XP, streak, recognition accuracy, solved count, and
+  best/weakest pattern stats.
+- Pattern map with seeded pattern cards, mastery levels, progress bars, and
+  recognition clues.
+- Pattern detail pages with descriptions, template summaries, common mistakes,
+  progress, and related seeded problems.
+- Daily Forge session with three local practice problems: warm-up, main forge,
+  and mixed review.
+- Problem practice flow:
+  - problem preview
+  - pattern recognition quiz
+  - reflection form
+  - local session summary
+- Seeded metadata for patterns and LeetCode problem links.
+- Local progress storage using `localStorage`.
+- Reset Local Progress button for testing.
+
+## What v0.0 Does Not Include
+
+- No backend.
+- No authentication.
+- No database.
+- No real AI integration.
+- No LeetCode scraping.
+- No copied LeetCode problem statements.
+
+Seeded problem data is limited to title, URL, difficulty, pattern metadata,
+recognition clues, common mistakes, and estimated time.
+
+## Run Locally
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Run checks:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run typecheck
+npm run lint
+npm run build
+npm test
+```
 
-## Learn More
+## Local Data
 
-To learn more about Next.js, take a look at the following resources:
+Progress is stored in the browser under:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```text
+patternforge_attempts_v0
+patternforge.progress.v0
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Use the dashboard's Reset Local Progress button to clear local attempts during
+testing.
 
-## Deploy on Vercel
+## Roadmap
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- v0.1: database and authentication.
+- v0.2: AI review for submitted reflections and solutions.
+- v0.3: spaced repetition scheduling.
+- v0.4: boss battles for high-pressure mixed drills.
+- v0.5: mixed-pattern recommendation engine.
