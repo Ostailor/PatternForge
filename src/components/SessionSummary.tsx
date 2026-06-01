@@ -1,4 +1,6 @@
 import type { Attempt, ForgeSessionSummary, Pattern, Problem } from "@/lib/types";
+import { LevelUpCard, XPToast } from "@/components/completion";
+import { calculateAttemptXp } from "@/lib/game/xp";
 
 type SessionSummaryProps = {
   summary?: Pick<
@@ -8,6 +10,11 @@ type SessionSummaryProps = {
   attempt?: Attempt;
   problem?: Problem;
   correctPattern?: Pattern;
+  levelUp?: {
+    patternName: string;
+    levelName: string;
+    levelNumber: number;
+  } | null;
 };
 
 export default function SessionSummary({
@@ -15,8 +22,11 @@ export default function SessionSummary({
   attempt,
   problem,
   correctPattern,
+  levelUp,
 }: SessionSummaryProps) {
   if (attempt && problem) {
+    const xpEarned = calculateAttemptXp(attempt);
+
     return (
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -70,6 +80,30 @@ export default function SessionSummary({
             feedback on your implementation. Correct pattern:{" "}
             {correctPattern?.name ?? "Unknown"}.
           </p>
+        </div>
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <XPToast
+            title={`Attempt complete: ${problem.title}`}
+            xpAmount={xpEarned}
+            description="Your saved reflection updated XP, streaks, quests, achievements, and pattern mastery."
+            nextActionLabel="Review with AI Coach"
+            nextActionHref="#ai-coach"
+          />
+          {correctPattern ? (
+            <LevelUpCard
+              patternName={levelUp?.patternName ?? correctPattern.name}
+              levelName={levelUp?.levelName}
+              levelNumber={levelUp?.levelNumber}
+              isLevelUp={Boolean(levelUp)}
+              description={
+                levelUp
+                  ? `Pattern level up: ${levelUp.patternName} is now ${levelUp.levelName}.`
+                  : "Pattern mastery was recalculated from this attempt. Keep the next rep focused on the same recognition cues."
+              }
+              nextActionLabel="Practice This Pattern"
+              nextActionHref={`/forge?pattern=${correctPattern.id}`}
+            />
+          ) : null}
         </div>
       </section>
     );

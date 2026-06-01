@@ -10,8 +10,10 @@ const navItems = [
   { href: "/", label: "Dashboard" },
   { href: "/patterns", label: "Patterns" },
   { href: "/forge", label: "Daily Forge" },
+  { href: "/battles", label: "Battles" },
   { href: "/review", label: "Review" },
   { href: "/flashcards", label: "Cards" },
+  { href: "/achievements", label: "Badges" },
   { href: "/mistakes", label: "Mistakes" },
 ];
 
@@ -28,7 +30,7 @@ export default function Navbar() {
           </span>
         </Link>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="grid w-full grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 sm:flex sm:w-auto sm:items-center">
+          <div className="grid w-full grid-cols-4 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 sm:flex sm:w-auto sm:items-center">
             {navItems.map((item) => (
               <Link
                 key={item.href}

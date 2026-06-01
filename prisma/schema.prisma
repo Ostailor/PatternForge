@@ -31,17 +31,61 @@ enum ReviewRating {
   Easy
 }
 
+enum BattleType {
+  PatternBoss
+  MixedBattle
+  ReviewGauntlet
+}
+
+enum BattleStatus {
+  Active
+  Completed
+  Abandoned
+}
+
+enum BattleResult {
+  Victory
+  PartialVictory
+  Defeat
+}
+
+enum RoundType {
+  Warmup
+  MainForge
+  PatternTwist
+  MixedReview
+  BossProblem
+}
+
+enum QuestStatus {
+  Active
+  Completed
+  Expired
+}
+
+enum GameEventType {
+  AttemptCompleted
+  ReviewCompleted
+  BattleCompleted
+  QuestCompleted
+  AchievementEarned
+}
+
 model UserProfile {
-  id          String      @id @default(cuid())
-  authUserId  String      @unique
-  displayName String
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  attempts    Attempt[]
-  aiReviews   AIReview[]
-  mistakes    Mistake[]
-  flashcards  Flashcard[]
-  reviewLogs  ReviewLog[]
+  id               String            @id @default(cuid())
+  authUserId       String            @unique
+  displayName      String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  attempts         Attempt[]
+  aiReviews        AIReview[]
+  mistakes         Mistake[]
+  flashcards       Flashcard[]
+  reviewLogs       ReviewLog[]
+  battles          Battle[]
+  quests           Quest[]
+  userAchievements UserAchievement[]
+  gameEvents       GameEvent[]
 }
 
 model Pattern {
@@ -61,6 +105,8 @@ model Pattern {
   aiReviews        AIReview[]
   mistakes         Mistake[]
   flashcards       Flashcard[]
+  targetBattles    Battle[]
+  expectedRounds   BattleRound[]
 
   @@index([levelOrder])
 }
@@ -79,6 +125,7 @@ model Problem {
   attempts         Attempt[]
   aiReviews        AIReview[]
   mistakes         Mistake[]
+  battleRounds     BattleRound[]
 }
 
 model ProblemPattern {
@@ -96,7 +143,7 @@ model ProblemPattern {
 }
 
 model Attempt {
-  id                String       @id @default(cuid())
+  id                String        @id @default(cuid())
   userProfileId     String
   problemId         String
   selectedPatternId String
@@ -105,15 +152,16 @@ model Attempt {
   solvedStatus      SolvedStatus
   timeSpentMinutes  Int
   confidence        Int
-  reflection        String       @db.Text
-  createdAt         DateTime     @default(now())
-  userProfile       UserProfile  @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
-  problem           Problem      @relation(fields: [problemId], references: [id], onDelete: Restrict)
-  selectedPattern   Pattern      @relation("SelectedPattern", fields: [selectedPatternId], references: [id], onDelete: Restrict)
-  correctPattern    Pattern      @relation("CorrectPattern", fields: [correctPatternId], references: [id], onDelete: Restrict)
+  reflection        String        @db.Text
+  createdAt         DateTime      @default(now())
+  userProfile       UserProfile   @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  problem           Problem       @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  selectedPattern   Pattern       @relation("SelectedPattern", fields: [selectedPatternId], references: [id], onDelete: Restrict)
+  correctPattern    Pattern       @relation("CorrectPattern", fields: [correctPatternId], references: [id], onDelete: Restrict)
   aiReviews         AIReview[]
   mistakes          Mistake[]
   flashcards        Flashcard[]
+  battleRounds      BattleRound[]
 
   @@index([userProfileId])
   @@index([problemId])
@@ -227,4 +275,118 @@ model ReviewLog {
   @@index([reviewedAt])
   @@index([flashcardId])
   @@index([mistakeId])
+}
+
+model Battle {
+  id              String        @id @default(cuid())
+  userProfileId   String
+  battleType      BattleType
+  title           String
+  targetPatternId String?
+  status          BattleStatus  @default(Active)
+  startedAt       DateTime      @default(now())
+  completedAt     DateTime?
+  totalRounds     Int
+  xpEarned        Int           @default(0)
+  result          BattleResult?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  userProfile     UserProfile   @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  targetPattern   Pattern?      @relation(fields: [targetPatternId], references: [id], onDelete: Restrict)
+  rounds          BattleRound[]
+
+  @@index([userProfileId])
+  @@index([targetPatternId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model BattleRound {
+  id                String    @id @default(cuid())
+  battleId          String
+  problemId         String
+  roundNumber       Int
+  roundType         RoundType
+  expectedPatternId String
+  attemptId         String?
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  battle            Battle    @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  problem           Problem   @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  expectedPattern   Pattern   @relation(fields: [expectedPatternId], references: [id], onDelete: Restrict)
+  attempt           Attempt?  @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@unique([battleId, roundNumber])
+  @@index([battleId])
+  @@index([problemId])
+  @@index([expectedPatternId])
+  @@index([attemptId])
+  @@index([createdAt])
+}
+
+model Quest {
+  id            String      @id @default(cuid())
+  userProfileId String
+  questType     String
+  title         String
+  description   String      @db.Text
+  targetCount   Int
+  currentCount  Int         @default(0)
+  xpReward      Int         @default(0)
+  status        QuestStatus @default(Active)
+  date          DateTime
+  completedAt   DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  userProfile   UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+
+  @@index([userProfileId])
+  @@index([status])
+  @@index([date])
+  @@index([createdAt])
+}
+
+model Achievement {
+  id               String            @id @default(cuid())
+  key              String            @unique
+  name             String
+  description      String            @db.Text
+  icon             String
+  xpReward         Int               @default(0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  userAchievements UserAchievement[]
+
+  @@index([createdAt])
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userProfileId String
+  achievementId String
+  earnedAt      DateTime    @default(now())
+  userProfile   UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userProfileId, achievementId])
+  @@index([userProfileId])
+  @@index([achievementId])
+  @@index([earnedAt])
+}
+
+model GameEvent {
+  id            String        @id @default(cuid())
+  userProfileId String
+  eventType     GameEventType
+  xpAmount      Int
+  description   String        @db.Text
+  metadata      Json          @default("{}")
+  eventKey      String        @unique
+  createdAt     DateTime      @default(now())
+  userProfile   UserProfile   @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+
+  @@index([userProfileId])
+  @@index([eventType])
+  @@index([createdAt])
 }

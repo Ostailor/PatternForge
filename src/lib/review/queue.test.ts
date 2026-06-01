@@ -7,7 +7,7 @@ import {
   toRetentionScore,
   validateReviewRequest,
   type ReviewQueueItem,
-} from "@/lib/review/queue";
+} from "@/lib/review/queueUtils";
 
 function item(
   id: string,

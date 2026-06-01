@@ -23,7 +23,7 @@ function attempt(createdAt: string): Attempt {
   };
 }
 
-test("calculateReviewXp applies v0.3 review rewards", () => {
+test("calculateReviewXp applies v0.4 review rewards", () => {
   assert.equal(
     calculateReviewXp({
       itemType: "Flashcard",
@@ -39,7 +39,7 @@ test("calculateReviewXp applies v0.3 review rewards", () => {
       reviewedAt: "2026-06-01T12:00:00.000Z",
       mistakeHadPriorLapse: true,
     }),
-    30,
+    15,
   );
 });
 
@@ -64,7 +64,7 @@ test("calculateCurrentStreak counts attempts and reviews", () => {
   );
 });
 
-test("getGamificationStats includes review XP and clear-due bonus", () => {
+test("getGamificationStats includes review XP without clear-due bonus", () => {
   const stats = getGamificationStats([attempt("2026-06-01T12:00:00.000Z")], {
     reviewActivities: [
       {
@@ -76,6 +76,6 @@ test("getGamificationStats includes review XP and clear-due bonus", () => {
     clearedDueReviewsToday: true,
   });
 
-  assert.equal(stats.xp, 65);
+  assert.equal(stats.xp, 55);
   assert.equal(stats.currentStreak, 1);
 });

@@ -1,24 +1,26 @@
 import { getPrisma } from "@/lib/prisma";
+import { checkAchievementsWithClient } from "@/lib/achievements/service";
+import { createGameEventWithClient } from "@/lib/game/events";
+import { calculateReviewXp } from "@/lib/game/xp";
+import { updateQuestProgress } from "@/lib/quests/updateQuestProgress";
 import { calculateNextReview } from "@/lib/review/scheduler";
+import type { ReviewItemType, ReviewRating } from "@/lib/review/types";
 import {
-  isReviewRating,
-  type ReviewItemType,
-  type ReviewRating,
-  type ReviewScheduleState,
-} from "@/lib/review/types";
+  sortReviewQueueItems,
+  toRetentionScore,
+  validateReviewRequest,
+  requireNonEmpty,
+  type ReviewQueueItem,
+} from "@/lib/review/queueUtils";
 
-export type ReviewQueueItem = ReviewScheduleState & {
-  id: string;
-  itemType: ReviewItemType;
-  patternId: string;
-  patternName: string;
-  problemTitle: string | null;
-  prompt: string;
-  answer: string;
-  reviewDueAt: Date;
-  lastReviewedAt: Date | null;
-  status: string;
-};
+export {
+  getRatingValue,
+  sortReviewQueueItems,
+  toRetentionScore,
+  validateReviewRequest,
+  ReviewValidationError,
+  type ReviewQueueItem,
+} from "@/lib/review/queueUtils";
 
 export type WeakestReviewPattern = {
   patternId: string;
@@ -50,17 +52,11 @@ export type RecentReviewHistoryItem = {
 export type ReviewSubmissionResult = {
   id: string;
   itemType: ReviewItemType;
+  reviewLogId: string;
   previousIntervalDays: number;
   nextIntervalDays: number;
   nextReviewDueAt: Date;
 };
-
-export class ReviewValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ReviewValidationError";
-  }
-}
 
 export class ReviewItemAccessError extends Error {
   constructor() {
@@ -75,71 +71,6 @@ const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 type DueFlashcard = Awaited<ReturnType<typeof getDueFlashcards>>[number];
 type DueMistake = Awaited<ReturnType<typeof getDueMistakes>>[number];
-
-function requireNonEmpty(value: string, message: string): string {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    throw new ReviewValidationError(message);
-  }
-
-  return trimmed;
-}
-
-export function validateReviewRequest(
-  userProfileId: string,
-  itemId: string,
-  rating: string,
-): ReviewRating {
-  requireNonEmpty(userProfileId, "User profile ID is required.");
-  requireNonEmpty(itemId, "Review item ID is required.");
-
-  if (!isReviewRating(rating)) {
-    throw new ReviewValidationError("Review rating is invalid.");
-  }
-
-  return rating;
-}
-
-export function getRatingValue(rating: ReviewRating): number {
-  switch (rating) {
-    case "Again":
-      return 0;
-    case "Hard":
-      return 50;
-    case "Good":
-      return 85;
-    case "Easy":
-      return 100;
-  }
-}
-
-export function toRetentionScore(ratings: ReviewRating[]): number | null {
-  if (ratings.length === 0) {
-    return null;
-  }
-
-  const total = ratings.reduce(
-    (sum, rating) => sum + getRatingValue(rating),
-    0,
-  );
-
-  return Math.round(total / ratings.length);
-}
-
-export function sortReviewQueueItems(
-  items: ReviewQueueItem[],
-): ReviewQueueItem[] {
-  return items.slice().sort((a, b) => {
-    const dueDelta = a.reviewDueAt.getTime() - b.reviewDueAt.getTime();
-
-    if (dueDelta !== 0) {
-      return dueDelta;
-    }
-
-    return a.itemType.localeCompare(b.itemType);
-  });
-}
 
 function getUtcDayWindow(now = new Date()) {
   const start = new Date(now);
@@ -474,6 +405,7 @@ export async function submitFlashcardReview(
         id: flashcardId.trim(),
         userProfileId: userProfileId.trim(),
         status: "active",
+        reviewDueAt: { lte: reviewedAt },
       },
     });
 
@@ -502,7 +434,7 @@ export async function submitFlashcardReview(
       },
     });
 
-    await tx.reviewLog.create({
+    const reviewLog = await tx.reviewLog.create({
       data: {
         userProfileId: flashcard.userProfileId,
         flashcardId: flashcard.id,
@@ -513,10 +445,35 @@ export async function submitFlashcardReview(
         reviewedAt,
       },
     });
+    const xpAmount = calculateReviewXp({
+      itemType: "Flashcard",
+      rating: validatedRating,
+    });
+
+    await createGameEventWithClient(
+      tx,
+      userProfileId,
+      "ReviewCompleted",
+      xpAmount,
+      "Flashcard reviewed",
+      {
+        reviewLogId: reviewLog.id,
+        flashcardId: flashcard.id,
+        itemType: "Flashcard",
+        rating: validatedRating,
+      },
+    );
+    await updateQuestProgress(tx, userProfileId, {
+      eventType: "ReviewCompleted",
+      reviewLogId: reviewLog.id,
+      itemType: "Flashcard",
+    });
+    await checkAchievementsWithClient(tx, userProfileId);
 
     return {
       id: flashcard.id,
       itemType: "Flashcard",
+      reviewLogId: reviewLog.id,
       previousIntervalDays: flashcard.intervalDays,
       nextIntervalDays: nextReview.nextIntervalDays,
       nextReviewDueAt: nextReview.nextReviewDueAt,
@@ -539,6 +496,7 @@ export async function submitMistakeReview(
         id: mistakeId.trim(),
         userProfileId: userProfileId.trim(),
         status: "active",
+        reviewDueAt: { lte: reviewedAt },
       },
     });
 
@@ -567,7 +525,7 @@ export async function submitMistakeReview(
       },
     });
 
-    await tx.reviewLog.create({
+    const reviewLog = await tx.reviewLog.create({
       data: {
         userProfileId: mistake.userProfileId,
         mistakeId: mistake.id,
@@ -578,10 +536,35 @@ export async function submitMistakeReview(
         reviewedAt,
       },
     });
+    const xpAmount = calculateReviewXp({
+      itemType: "Mistake",
+      rating: validatedRating,
+    });
+
+    await createGameEventWithClient(
+      tx,
+      userProfileId,
+      "ReviewCompleted",
+      xpAmount,
+      "Mistake reviewed",
+      {
+        reviewLogId: reviewLog.id,
+        mistakeId: mistake.id,
+        itemType: "Mistake",
+        rating: validatedRating,
+      },
+    );
+    await updateQuestProgress(tx, userProfileId, {
+      eventType: "ReviewCompleted",
+      reviewLogId: reviewLog.id,
+      itemType: "Mistake",
+    });
+    await checkAchievementsWithClient(tx, userProfileId);
 
     return {
       id: mistake.id,
       itemType: "Mistake",
+      reviewLogId: reviewLog.id,
       previousIntervalDays: mistake.intervalDays,
       nextIntervalDays: nextReview.nextIntervalDays,
       nextReviewDueAt: nextReview.nextReviewDueAt,

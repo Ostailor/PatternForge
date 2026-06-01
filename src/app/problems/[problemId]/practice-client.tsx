@@ -8,7 +8,14 @@ import RecognitionQuiz from "@/components/RecognitionQuiz";
 import ReflectionForm from "@/components/ReflectionForm";
 import SessionSummary from "@/components/SessionSummary";
 import { getPatternById } from "@/data/patterns";
+import {
+  getMasteryLevel,
+  getMasteryLevelNumber,
+  getPatternProgress,
+} from "@/lib/mastery";
+import { mergeAttempt } from "@/lib/progress";
 import type { Attempt, Pattern, Problem } from "@/lib/types";
+import { useAuthProgress } from "@/lib/use-auth-progress";
 
 type PracticeStep = "preview" | "quiz" | "reflection" | "summary";
 
@@ -27,10 +34,42 @@ export default function ProblemPracticeClient({
   problem,
   patterns,
 }: ProblemPracticeClientProps) {
+  const { progress } = useAuthProgress();
   const [step, setStep] = useState<PracticeStep>("preview");
   const [selectedPatternId, setSelectedPatternId] = useState("");
   const [savedAttempt, setSavedAttempt] = useState<Attempt | undefined>();
+  const [levelUp, setLevelUp] = useState<{
+    patternName: string;
+    levelName: string;
+    levelNumber: number;
+  } | null>(null);
   const correctPattern = getPatternById(problem.primaryPatternId);
+
+  function detectLevelUp(attempt: Attempt) {
+    const pattern = getPatternById(attempt.correctPatternId);
+
+    if (!pattern) {
+      return null;
+    }
+
+    const beforeProgress = getPatternProgress(attempt.correctPatternId, progress);
+    const afterProgress = getPatternProgress(
+      attempt.correctPatternId,
+      mergeAttempt(progress, attempt),
+    );
+    const beforeLevelNumber = getMasteryLevelNumber(beforeProgress.masteryScore);
+    const afterLevelNumber = getMasteryLevelNumber(afterProgress.masteryScore);
+
+    if (afterLevelNumber <= beforeLevelNumber) {
+      return null;
+    }
+
+    return {
+      patternName: pattern.name,
+      levelName: getMasteryLevel(afterProgress.masteryScore),
+      levelNumber: afterLevelNumber,
+    };
+  }
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
@@ -141,6 +180,7 @@ export default function ProblemPracticeClient({
               problem={problem}
               selectedPatternId={selectedPatternId}
               onSaved={(attempt) => {
+                setLevelUp(detectLevelUp(attempt));
                 setSavedAttempt(attempt);
                 setStep("summary");
               }}
@@ -153,8 +193,11 @@ export default function ProblemPracticeClient({
                 attempt={savedAttempt}
                 problem={problem}
                 correctPattern={correctPattern}
+                levelUp={levelUp}
               />
-              <AIReviewPanel attempt={savedAttempt} />
+              <div id="ai-coach">
+                <AIReviewPanel attempt={savedAttempt} />
+              </div>
             </>
           ) : null}
         </div>

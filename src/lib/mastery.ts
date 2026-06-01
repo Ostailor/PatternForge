@@ -168,6 +168,29 @@ export function getMasteryLevel(masteryScore: number): MasteryLevel {
   return "Not Started";
 }
 
+export function getMasteryLevelNumber(masteryScore: number): 0 | 1 | 2 | 3 | 4 | 5 {
+  const level = getMasteryLevel(masteryScore);
+
+  switch (level) {
+    case "Mastered":
+      return 5;
+    case "Sharp":
+      return 4;
+    case "Forging":
+      return 3;
+    case "Apprentice":
+      return 2;
+    case "Warming Up":
+      return 1;
+    case "Not Started":
+      return 0;
+  }
+}
+
+export function isMasterTier(masteryScore: number): boolean {
+  return masteryScore >= 76;
+}
+
 export function calculateMasteryLevel(stats: PatternStats): MasteryLevel {
   return getMasteryLevel(getPatternProgressPercent(stats));
 }

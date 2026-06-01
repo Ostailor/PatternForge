@@ -5,6 +5,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { patterns } from "../src/data/patterns";
 import { problems } from "../src/data/problems";
 import { Difficulty, PrismaClient } from "../src/generated/prisma/client";
+import { achievementDefinitions } from "../src/lib/achievements/definitions";
 import type { Problem as SeedProblem } from "../src/lib/types";
 
 const connectionString = process.env.DATABASE_URL;
@@ -168,16 +169,37 @@ async function main(): Promise<void> {
         });
       }
     }
+
+    for (const achievement of achievementDefinitions) {
+      await tx.achievement.upsert({
+        where: { key: achievement.key },
+        update: {
+          name: achievement.name,
+          description: achievement.description,
+          icon: achievement.icon,
+          xpReward: achievement.xpReward,
+        },
+        create: {
+          key: achievement.key,
+          name: achievement.name,
+          description: achievement.description,
+          icon: achievement.icon,
+          xpReward: achievement.xpReward,
+        },
+      });
+    }
   });
 
-  const [patternCount, problemCount, problemPatternCount] = await Promise.all([
-    prisma.pattern.count(),
-    prisma.problem.count(),
-    prisma.problemPattern.count(),
-  ]);
+  const [patternCount, problemCount, problemPatternCount, achievementCount] =
+    await Promise.all([
+      prisma.pattern.count(),
+      prisma.problem.count(),
+      prisma.problemPattern.count(),
+      prisma.achievement.count(),
+    ]);
 
   console.log(
-    `Seeded ${patternCount} patterns, ${problemCount} problems, and ${problemPatternCount} problem-pattern relationships.`,
+    `Seeded ${patternCount} patterns, ${problemCount} problems, ${problemPatternCount} problem-pattern relationships, and ${achievementCount} achievements.`,
   );
 }
 

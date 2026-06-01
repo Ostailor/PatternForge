@@ -49,10 +49,10 @@ export function calculateAttemptXp(attempt: Attempt): number {
 
 export function calculateReviewXp(activity: ReviewXpActivity): number {
   return (
-    5 +
+    (activity.itemType === "Flashcard" ? 5 : 0) +
+    (activity.itemType === "Mistake" ? 5 : 0) +
     (activity.rating === "Good" ? 5 : 0) +
-    (activity.rating === "Easy" ? 10 : 0) +
-    (activity.itemType === "Mistake" && activity.mistakeHadPriorLapse ? 15 : 0)
+    (activity.rating === "Easy" ? 10 : 0)
   );
 }
 
@@ -123,7 +123,7 @@ export function getGamificationStats(
   );
 
   return {
-    xp: attemptXp + reviewXp + (options.clearedDueReviewsToday ? 10 : 0),
+    xp: attemptXp + reviewXp,
     totalAttempts: attempts.length,
     problemsAttempted: attemptedProblemIds.size,
     problemsSolved: solvedProblemIds.size,

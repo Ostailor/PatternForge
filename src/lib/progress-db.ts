@@ -1,16 +1,31 @@
 import {
+  Prisma,
   SolvedStatus as PrismaSolvedStatus,
   type Attempt as DbAttempt,
 } from "@/generated/prisma/client";
 import { patterns } from "@/data/patterns";
+import { achievementDefinitions } from "@/lib/achievements/definitions";
+import {
+  checkAchievementsWithClient,
+  getAchievementCatalog,
+} from "@/lib/achievements/service";
+import { summarizeBattleStats } from "@/lib/battles/dashboard";
 import {
   getGamificationStats,
   type ReviewXpActivity,
 } from "@/lib/gamification";
+import {
+  createGameEventWithClient,
+  getRecentGameEvents,
+  getTotalXP,
+} from "@/lib/game/events";
+import { calculateAttemptXp as calculateAttemptGameXp } from "@/lib/game/xp";
 import { getPatternProgress } from "@/lib/mastery";
 import { calculateMemoryStreak } from "@/lib/memory-streak";
 import { getPrisma } from "@/lib/prisma";
 import { progressFromAttempts } from "@/lib/progress";
+import { generateDailyQuests } from "@/lib/quests/generateDailyQuests";
+import { updateQuestProgress } from "@/lib/quests/updateQuestProgress";
 import { getReviewStats, type ReviewStats } from "@/lib/review/queue";
 import type { ReviewRating } from "@/lib/review/types";
 import type {
@@ -32,12 +47,82 @@ export type CreateAttemptInput = {
   createdAt?: string;
 };
 
+export type DashboardBattleCardData = {
+  activeBattle: {
+    id: string;
+    title: string;
+    battleType: string;
+    targetPatternName: string | null;
+    completedRounds: number;
+    totalRounds: number;
+    progress: number;
+    startedAt: string;
+  } | null;
+  recommendedBattle: {
+    battleType: string;
+    title: string;
+    description: string;
+    reason: string;
+  };
+  stats: {
+    completed: number;
+    victories: number;
+    partialVictories: number;
+    averageRecognitionAccuracy: number;
+  };
+  entryHref: string;
+  buttonLabel: string;
+};
+
+export type DashboardGameEventItem = {
+  id: string;
+  eventType: string;
+  title: string;
+  description: string;
+  xpAmount: number;
+  createdAt: string;
+};
+
+export type DashboardAchievementPreview = {
+  recentEarned: {
+    id: string;
+    key: string;
+    name: string;
+    description: string;
+    icon: string;
+    xpReward: number;
+    earnedAt: string;
+  }[];
+  nextBadge: {
+    id: string;
+    key: string;
+    name: string;
+    description: string;
+    icon: string;
+    xpReward: number;
+  } | null;
+};
+
+export type DashboardGamificationData = {
+  battleCard: DashboardBattleCardData;
+  recentGameEvents: {
+    events: DashboardGameEventItem[];
+    xpEarned: number;
+    achievementsEarned: number;
+    battlesCompleted: number;
+    questsCompleted: number;
+  };
+  achievementsPreview: DashboardAchievementPreview;
+};
+
 export type UserProgressSnapshot = {
   progress: UserProgress | null;
   dashboardStats: ReturnType<typeof getGamificationStats> | null;
   patternProgress: PatternProgress | null;
   patternProgressById: Record<string, PatternProgress> | null;
   reviewStats: (ReviewStats & { memoryStreak: number }) | null;
+  dailyQuests: Awaited<ReturnType<typeof generateDailyQuests>> | null;
+  dashboardGamification: DashboardGamificationData | null;
 };
 
 export type ImportAttemptsResult = {
@@ -105,6 +190,366 @@ const MAX_PATTERN_SIGNAL_COUNT = 20;
 const MAX_RECENT_REVIEW_LOGS = 1000;
 const MAX_RECENT_AI_REVIEWS = 500;
 const MAX_XP_REVIEW_LOGS = 5000;
+const RECENT_DASHBOARD_EVENT_COUNT = 8;
+
+function readJsonString(value: Prisma.JsonValue, key: string): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const field = value[key];
+
+  return typeof field === "string" && field.trim() ? field : null;
+}
+
+function getUniqueAttemptedProblemCount(attempts: Attempt[]): number {
+  return new Set(attempts.map((attempt) => attempt.problemId)).size;
+}
+
+function getRecommendedBattle({
+  attempts,
+  reviewSignalCount,
+  patternProgressById,
+}: {
+  attempts: Attempt[];
+  reviewSignalCount: number;
+  patternProgressById: Record<string, PatternProgress>;
+}): DashboardBattleCardData["recommendedBattle"] {
+  const uniqueAttemptedProblemCount = getUniqueAttemptedProblemCount(attempts);
+
+  if (reviewSignalCount >= 3) {
+    return {
+      battleType: "ReviewGauntlet",
+      title: "Review Gauntlet",
+      description: "Turn recent mistakes and hard reviews into a focused run.",
+      reason: `${reviewSignalCount} review signals are ready.`,
+    };
+  }
+
+  if (uniqueAttemptedProblemCount >= 5) {
+    return {
+      battleType: "MixedBattle",
+      title: "Mixed Battle",
+      description: "Mix practiced patterns to test recognition under pressure.",
+      reason: `${uniqueAttemptedProblemCount} unique problems attempted.`,
+    };
+  }
+
+  const targetPattern =
+    patterns
+      .map((pattern) => ({
+        pattern,
+        progress: patternProgressById[pattern.id],
+      }))
+      .filter(({ progress }) => (progress?.attemptedCount ?? 0) > 0)
+      .sort(
+        (a, b) =>
+          (a.progress?.masteryScore ?? 0) -
+            (b.progress?.masteryScore ?? 0) ||
+          a.pattern.levelOrder - b.pattern.levelOrder,
+      )[0]?.pattern ?? patterns.find((pattern) => pattern.id === "arrays-hashing");
+
+  return {
+    battleType: "PatternBoss",
+    title: targetPattern ? `${targetPattern.name} Pattern Boss` : "Pattern Boss",
+    description: "Duel one pattern and build battle history without waiting.",
+    reason:
+      attempts.length === 0
+        ? "Start with an easy first boss."
+        : "Sharpen your weakest practiced lane.",
+  };
+}
+
+function formatEventTitle(
+  event: Awaited<ReturnType<typeof getRecentGameEvents>>[number],
+  lookups: {
+    achievements: Map<string, string>;
+    battles: Map<string, string>;
+    quests: Map<string, string>;
+  },
+): string {
+  switch (event.eventType) {
+    case "AchievementEarned": {
+      const achievementId = readJsonString(event.metadata, "achievementId");
+      const achievementKey = readJsonString(event.metadata, "achievementKey");
+      const fallback = achievementDefinitions.find(
+        (definition) => definition.key === achievementKey,
+      )?.name;
+
+      return `Achievement: ${
+        (achievementId ? lookups.achievements.get(achievementId) : null) ??
+        fallback ??
+        "Badge earned"
+      }`;
+    }
+    case "BattleCompleted": {
+      const battleId = readJsonString(event.metadata, "battleId");
+
+      return `${
+        (battleId ? lookups.battles.get(battleId) : null) ?? "Boss Battle"
+      } completed`;
+    }
+    case "QuestCompleted": {
+      const questId = readJsonString(event.metadata, "questId");
+
+      return `Quest: ${
+        (questId ? lookups.quests.get(questId) : null) ?? "Daily objective"
+      }`;
+    }
+    case "AttemptCompleted":
+      return "Practice attempt completed";
+    case "ReviewCompleted":
+      return "Review completed";
+    default:
+      return event.description;
+  }
+}
+
+async function getRecentDashboardEvents(
+  userProfileId: string,
+): Promise<DashboardGamificationData["recentGameEvents"]> {
+  const events = await getRecentGameEvents(
+    userProfileId,
+    RECENT_DASHBOARD_EVENT_COUNT,
+  );
+  const achievementIds = events
+    .map((event) => readJsonString(event.metadata, "achievementId"))
+    .filter((id): id is string => id !== null);
+  const battleIds = events
+    .map((event) => readJsonString(event.metadata, "battleId"))
+    .filter((id): id is string => id !== null);
+  const questIds = events
+    .map((event) => readJsonString(event.metadata, "questId"))
+    .filter((id): id is string => id !== null);
+  const [achievements, battles, quests] = await Promise.all([
+    achievementIds.length > 0
+      ? getPrisma().achievement.findMany({
+          where: { id: { in: achievementIds } },
+          select: { id: true, name: true },
+        })
+      : [],
+    battleIds.length > 0
+      ? getPrisma().battle.findMany({
+          where: { id: { in: battleIds } },
+          select: { id: true, title: true },
+        })
+      : [],
+    questIds.length > 0
+      ? getPrisma().quest.findMany({
+          where: { id: { in: questIds } },
+          select: { id: true, title: true },
+        })
+      : [],
+  ]);
+  const lookups = {
+    achievements: new Map(
+      achievements.map((achievement) => [achievement.id, achievement.name]),
+    ),
+    battles: new Map(battles.map((battle) => [battle.id, battle.title])),
+    quests: new Map(quests.map((quest) => [quest.id, quest.title])),
+  };
+
+  return {
+    events: events.map((event) => ({
+      id: event.id,
+      eventType: event.eventType,
+      title: formatEventTitle(event, lookups),
+      description: event.description,
+      xpAmount: event.xpAmount,
+      createdAt: event.createdAt.toISOString(),
+    })),
+    xpEarned: events.reduce((total, event) => total + event.xpAmount, 0),
+    achievementsEarned: events.filter(
+      (event) => event.eventType === "AchievementEarned",
+    ).length,
+    battlesCompleted: events.filter(
+      (event) => event.eventType === "BattleCompleted",
+    ).length,
+    questsCompleted: events.filter((event) => event.eventType === "QuestCompleted")
+      .length,
+  };
+}
+
+async function getDashboardAchievementPreview(
+  userProfileId: string,
+): Promise<DashboardAchievementPreview> {
+  const catalog = await getAchievementCatalog(userProfileId);
+  const sourceCatalog =
+    catalog.length > 0
+      ? catalog
+      : achievementDefinitions.map((definition) => ({
+          id: definition.key,
+          key: definition.key,
+          name: definition.name,
+          description: definition.description,
+          icon: definition.icon,
+          xpReward: definition.xpReward,
+          earnedAt: null,
+        }));
+  const recentEarned = sourceCatalog
+    .filter((achievement) => achievement.earnedAt)
+    .sort(
+      (a, b) =>
+        new Date(b.earnedAt ?? 0).getTime() -
+        new Date(a.earnedAt ?? 0).getTime(),
+    )
+    .slice(0, 3)
+    .map((achievement) => ({
+      ...achievement,
+      earnedAt: achievement.earnedAt ?? "",
+    }));
+  const nextBadge =
+    sourceCatalog.find((achievement) => !achievement.earnedAt) ?? null;
+
+  return {
+    recentEarned,
+    nextBadge: nextBadge
+      ? {
+          id: nextBadge.id,
+          key: nextBadge.key,
+          name: nextBadge.name,
+          description: nextBadge.description,
+          icon: nextBadge.icon,
+          xpReward: nextBadge.xpReward,
+        }
+      : null,
+  };
+}
+
+async function getDashboardReviewSignalCount(userProfileId: string): Promise<number> {
+  const [mistakeCount, reviewCount] = await Promise.all([
+    getPrisma().mistake.count({
+      where: { userProfileId },
+    }),
+    getPrisma().reviewLog.count({
+      where: { userProfileId },
+    }),
+  ]);
+
+  return mistakeCount + reviewCount;
+}
+
+async function getDashboardBattleCardData({
+  userProfileId,
+  attempts,
+  patternProgressById,
+}: {
+  userProfileId: string;
+  attempts: Attempt[];
+  patternProgressById: Record<string, PatternProgress>;
+}): Promise<DashboardBattleCardData> {
+  const [activeBattle, completedBattles, reviewSignalCount] = await Promise.all([
+    getPrisma().battle.findFirst({
+      where: {
+        userProfileId,
+        status: "Active",
+      },
+      include: {
+        targetPattern: true,
+        rounds: {
+          select: {
+            completedAt: true,
+          },
+        },
+      },
+      orderBy: {
+        startedAt: "desc",
+      },
+    }),
+    getPrisma().battle.findMany({
+      where: {
+        userProfileId,
+        status: "Completed",
+      },
+      include: {
+        targetPattern: true,
+        rounds: {
+          include: {
+            attempt: {
+              select: {
+                wasPatternCorrect: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        completedAt: "desc",
+      },
+    }),
+    getDashboardReviewSignalCount(userProfileId),
+  ]);
+  const stats = summarizeBattleStats(
+    completedBattles.map((battle) => ({
+      battleType: battle.battleType,
+      result: battle.result,
+      targetPatternName: battle.targetPattern?.name,
+      rounds: battle.rounds.map((round) => ({
+        wasPatternCorrect: round.attempt?.wasPatternCorrect ?? null,
+      })),
+    })),
+  );
+  const completedRounds =
+    activeBattle?.rounds.filter((round) => round.completedAt).length ?? 0;
+  const totalRounds = activeBattle?.totalRounds ?? 0;
+
+  return {
+    activeBattle: activeBattle
+      ? {
+          id: activeBattle.id,
+          title: activeBattle.title,
+          battleType: activeBattle.battleType,
+          targetPatternName: activeBattle.targetPattern?.name ?? null,
+          completedRounds,
+          totalRounds,
+          progress:
+            totalRounds === 0
+              ? 0
+              : Math.round((completedRounds / totalRounds) * 100),
+          startedAt: activeBattle.startedAt.toISOString(),
+        }
+      : null,
+    recommendedBattle: getRecommendedBattle({
+      attempts,
+      reviewSignalCount,
+      patternProgressById,
+    }),
+    stats: {
+      completed: stats.battlesCompleted,
+      victories: stats.victories,
+      partialVictories: stats.partialVictories,
+      averageRecognitionAccuracy: stats.averageRecognitionAccuracy,
+    },
+    entryHref: activeBattle ? `/battles/${activeBattle.id}` : "/battles",
+    buttonLabel: activeBattle ? "Enter Battle" : "Enter Battle",
+  };
+}
+
+async function getDashboardGamificationData({
+  userProfileId,
+  attempts,
+  patternProgressById,
+}: {
+  userProfileId: string;
+  attempts: Attempt[];
+  patternProgressById: Record<string, PatternProgress>;
+}): Promise<DashboardGamificationData> {
+  const achievementsPreview = await getDashboardAchievementPreview(userProfileId);
+  const [battleCard, recentGameEvents] = await Promise.all([
+    getDashboardBattleCardData({
+      userProfileId,
+      attempts,
+      patternProgressById,
+    }),
+    getRecentDashboardEvents(userProfileId),
+  ]);
+
+  return {
+    battleCard,
+    recentGameEvents,
+    achievementsPreview,
+  };
+}
 
 function createPatternMasteryInputMap(): Map<string, PatternMasteryInputs> {
   return new Map(
@@ -354,11 +799,16 @@ export async function getCurrentUserDashboardStats() {
     getReviewXpActivities(userProfile.id),
   ]);
 
-  return getGamificationStats(attempts, {
+  const stats = getGamificationStats(attempts, {
     reviewActivities,
     clearedDueReviewsToday:
       reviewStats.reviewedTodayCount > 0 && reviewStats.totalDueCount === 0,
   });
+
+  return {
+    ...stats,
+    xp: await getTotalXP(userProfile.id),
+  };
 }
 
 export async function getCurrentUserProgressSnapshot(
@@ -373,29 +823,49 @@ export async function getCurrentUserProgressSnapshot(
       patternProgress: null,
       patternProgressById: null,
       reviewStats: null,
+      dailyQuests: null,
+      dashboardGamification: null,
     };
   }
 
   const progress = progressFromAttempts(attempts);
   const userProfile = await ensureCurrentUserProfile();
-  const [reviewStats, reviewActivities, patternInputMap] = userProfile
+  const [reviewStats, reviewActivities, patternInputMap, dailyQuests] = userProfile
     ? await Promise.all([
         getReviewStats(userProfile.id),
         getReviewXpActivities(userProfile.id),
         getPatternMasteryInputMap(userProfile.id),
+        generateDailyQuests(userProfile.id),
       ])
-    : [null, [], createPatternMasteryInputMap()];
+    : [null, [], createPatternMasteryInputMap(), null];
   const patternProgressById = getPatternProgressById(progress, patternInputMap);
+
+  const dashboardStats = getGamificationStats(attempts, {
+    reviewActivities,
+    clearedDueReviewsToday:
+      reviewStats !== null &&
+      reviewStats.reviewedTodayCount > 0 &&
+      reviewStats.totalDueCount === 0,
+  });
+  const [totalXp, dashboardGamification] = userProfile
+    ? await Promise.all([
+        getTotalXP(userProfile.id),
+        getDashboardGamificationData({
+          userProfileId: userProfile.id,
+          attempts,
+          patternProgressById,
+        }),
+      ])
+    : [dashboardStats.xp, null];
 
   return {
     progress,
-    dashboardStats: getGamificationStats(attempts, {
-      reviewActivities,
-      clearedDueReviewsToday:
-        reviewStats !== null &&
-        reviewStats.reviewedTodayCount > 0 &&
-        reviewStats.totalDueCount === 0,
-    }),
+    dashboardStats: userProfile
+      ? {
+          ...dashboardStats,
+          xp: totalXp,
+        }
+      : dashboardStats,
     patternProgress: patternId
       ? (patternProgressById[patternId] ?? null)
       : null,
@@ -411,16 +881,18 @@ export async function getCurrentUserProgressSnapshot(
           }),
         }
       : null,
+    dailyQuests,
+    dashboardGamification,
   };
 }
 
-export async function createAttemptForUserProfile(
+export async function createAttemptForUserProfileWithClient(
+  client: Prisma.TransactionClient,
   userProfileId: string,
   input: CreateAttemptInput,
 ): Promise<Attempt> {
-  const prisma = getPrisma();
   const [problem, selectedPattern] = await Promise.all([
-    prisma.problem.findUnique({
+    client.problem.findUnique({
       where: { id: input.problemId },
       include: {
         problemPatterns: {
@@ -429,7 +901,7 @@ export async function createAttemptForUserProfile(
         },
       },
     }),
-    prisma.pattern.findUnique({
+    client.pattern.findUnique({
       where: { id: input.selectedPatternId },
     }),
   ]);
@@ -445,7 +917,7 @@ export async function createAttemptForUserProfile(
   }
 
   const createdAt = normalizeCreatedAt(input.createdAt);
-  const dbAttempt = await prisma.attempt.create({
+  const attempt = await client.attempt.create({
     data: {
       userProfileId,
       problemId: input.problemId,
@@ -459,8 +931,42 @@ export async function createAttemptForUserProfile(
       ...(createdAt ? { createdAt: new Date(createdAt) } : {}),
     },
   });
+  const appAttempt = toAppAttempt(attempt);
 
-  return toAppAttempt(dbAttempt);
+  await createGameEventWithClient(
+    client,
+    userProfileId,
+    "AttemptCompleted",
+    calculateAttemptGameXp(appAttempt),
+    "Practice attempt completed",
+    {
+      attemptId: attempt.id,
+      problemId: attempt.problemId,
+      selectedPatternId: attempt.selectedPatternId,
+      correctPatternId: attempt.correctPatternId,
+      wasPatternCorrect: attempt.wasPatternCorrect,
+      solvedStatus: appAttempt.solvedStatus,
+    },
+  );
+  await updateQuestProgress(client, userProfileId, {
+    eventType: "AttemptCompleted",
+    attemptId: attempt.id,
+    correctPatternId: attempt.correctPatternId,
+    wasPatternCorrect: attempt.wasPatternCorrect,
+    solvedStatus: appAttempt.solvedStatus,
+  });
+  await checkAchievementsWithClient(client, userProfileId);
+
+  return appAttempt;
+}
+
+export async function createAttemptForUserProfile(
+  userProfileId: string,
+  input: CreateAttemptInput,
+): Promise<Attempt> {
+  return getPrisma().$transaction((tx) =>
+    createAttemptForUserProfileWithClient(tx, userProfileId, input),
+  );
 }
 
 export async function createCurrentUserAttempt(

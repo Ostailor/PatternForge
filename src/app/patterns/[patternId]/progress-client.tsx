@@ -4,7 +4,12 @@ import { SignInButton } from "@clerk/nextjs";
 
 import MasteryBadge from "@/components/MasteryBadge";
 import ProgressBar from "@/components/ProgressBar";
-import { getMasteryLevel, getPatternProgress } from "@/lib/mastery";
+import {
+  getMasteryLevel,
+  getMasteryLevelNumber,
+  getPatternProgress,
+  isMasterTier,
+} from "@/lib/mastery";
 import { useAuthProgress } from "@/lib/use-auth-progress";
 
 type PatternProgressProps = {
@@ -20,6 +25,7 @@ export function PatternMasteryBadge({ patternId }: PatternProgressProps) {
   const progress =
     patternProgressById?.[patternId] ??
     getPatternProgress(patternId, userProgress);
+  const level = getMasteryLevel(progress.masteryScore);
 
   if (!isSignedIn) {
     return null;
@@ -27,7 +33,8 @@ export function PatternMasteryBadge({ patternId }: PatternProgressProps) {
 
   return (
     <MasteryBadge
-      level={getMasteryLevel(progress.masteryScore)}
+      level={level}
+      levelNumber={getMasteryLevelNumber(progress.masteryScore)}
       score={progress.masteryScore}
     />
   );
@@ -71,6 +78,8 @@ export function PatternProgressPanel({ patternId }: PatternProgressProps) {
   const progress =
     patternProgressById?.[patternId] ??
     getPatternProgress(patternId, userProgress);
+  const level = getMasteryLevel(progress.masteryScore);
+  const levelNumber = getMasteryLevelNumber(progress.masteryScore);
   const recognitionRate =
     progress.recognitionAttempts === 0
       ? 0
@@ -108,41 +117,46 @@ export function PatternProgressPanel({ patternId }: PatternProgressProps) {
         </div>
       ) : (
         <>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-            User progress for this pattern
-          </p>
-          <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
-            Level {getMasteryLevel(progress.masteryScore)}
-          </h2>
-        </div>
-        <p className="text-3xl font-black text-slate-950">
-          {progress.masteryScore}%
-        </p>
-      </div>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="rounded-lg border border-slate-200 bg-slate-50 p-4"
-          >
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
-              {stat.label}
-            </p>
-            <p className="mt-2 text-2xl font-black text-slate-950">
-              {stat.value}
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                User progress for this pattern
+              </p>
+              <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+                Level {levelNumber} · {level}
+              </h2>
+              {isMasterTier(progress.masteryScore) ? (
+                <p className="mt-2 text-sm font-black text-indigo-700">
+                  Master-tier Boss Battle styling unlocked.
+                </p>
+              ) : null}
+            </div>
+            <p className="text-3xl font-black text-slate-950">
+              {progress.masteryScore}%
             </p>
           </div>
-        ))}
-      </div>
 
-        <p className="mt-4 text-sm font-semibold text-slate-500">
-          {progress.lastPracticedAt
-            ? `Last practiced ${new Date(progress.lastPracticedAt).toLocaleDateString()}`
-            : "No saved attempts yet. Start a focused forge to create progress."}
-        </p>
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            {stats.map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+              >
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                  {stat.label}
+                </p>
+                <p className="mt-2 text-2xl font-black text-slate-950">
+                  {stat.value}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <p className="mt-4 text-sm font-semibold text-slate-500">
+            {progress.lastPracticedAt
+              ? `Last practiced ${new Date(progress.lastPracticedAt).toLocaleDateString()}`
+              : "No saved attempts yet. Start a focused forge to create progress."}
+          </p>
         </>
       )}
     </div>

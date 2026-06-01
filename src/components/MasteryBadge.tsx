@@ -11,14 +11,20 @@ const styles: Record<MasteryLevel, string> = {
 
 type MasteryBadgeProps = {
   level: MasteryLevel;
+  levelNumber?: number;
   score?: number;
 };
 
-export default function MasteryBadge({ level, score }: MasteryBadgeProps) {
+export default function MasteryBadge({
+  level,
+  levelNumber,
+  score,
+}: MasteryBadgeProps) {
   return (
     <span
       className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-bold uppercase tracking-[0.14em] ${styles[level]}`}
     >
+      {typeof levelNumber === "number" ? `L${levelNumber} · ` : ""}
       {level}
       {typeof score === "number" ? ` · ${score}%` : ""}
     </span>

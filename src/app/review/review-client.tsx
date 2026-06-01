@@ -7,6 +7,7 @@ import {
   submitReviewAction,
   type SubmitReviewResult,
 } from "@/app/review/actions";
+import { XPToast } from "@/components/completion";
 import type { ReviewItemType, ReviewRating } from "@/lib/review/types";
 
 type ReviewQueueItemView = {
@@ -70,10 +71,10 @@ const ratingStyles: Record<ReviewRating, string> = {
 
 function calculateReviewXp(item: ReviewQueueItemView, rating: ReviewRating) {
   return (
-    5 +
+    (item.itemType === "Flashcard" ? 5 : 0) +
+    (item.itemType === "Mistake" ? 5 : 0) +
     (rating === "Good" ? 5 : 0) +
-    (rating === "Easy" ? 10 : 0) +
-    (item.itemType === "Mistake" && item.lapses > 0 ? 15 : 0)
+    (rating === "Easy" ? 10 : 0)
   );
 }
 
@@ -445,6 +446,30 @@ function ReviewSummary({
           <ReviewStat label="Mistakes reviewed" value={mistakesReviewed} />
           <ReviewStat label="XP earned" value={xpEarned} />
           <ReviewStat label="Items rescheduled" value={completedCount} />
+        </div>
+
+        <div className="mt-5">
+          <XPToast
+            title={`Review session complete: ${completedCount} item${
+              completedCount === 1 ? "" : "s"
+            }`}
+            xpAmount={xpEarned}
+            description={
+              remainingDueCount === 0
+                ? "Daily Review is clear. Next move: practice the weakest pattern while retention is fresh."
+                : "Next move: review the remaining due cards or practice the weakest reviewed pattern."
+            }
+            nextActionLabel={
+              remainingDueCount > 0 ? "Review More" : "Start Focused Practice"
+            }
+            nextActionHref={
+              remainingDueCount > 0
+                ? "/review?continue=1"
+                : practicePatternId
+                  ? `/forge?pattern=${practicePatternId}`
+                  : "/forge"
+            }
+          />
         </div>
 
         <div className="mt-5 grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import MasteryBadge from "./MasteryBadge";
 import ProgressBar from "./ProgressBar";
+import { getMasteryLevelNumber, isMasterTier } from "@/lib/mastery";
 import type { MasteryLevel, Pattern } from "@/lib/types";
 
 const accents = [
@@ -29,9 +30,17 @@ export default function PatternCard({
   showProgress = true,
 }: PatternCardProps) {
   const accent = accents[(pattern.levelOrder - 1) % accents.length];
+  const levelNumber = getMasteryLevelNumber(progress);
+  const masterTier = isMasterTier(progress);
 
   return (
-    <article className="group flex h-full flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
+    <article
+      className={`group flex h-full flex-col rounded-lg border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+        masterTier
+          ? "border-indigo-200 ring-1 ring-indigo-100 hover:border-indigo-300"
+          : "border-slate-200 hover:border-slate-300"
+      }`}
+    >
       <div className={`mb-5 h-1.5 w-16 rounded-full bg-gradient-to-r ${accent}`} />
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -43,9 +52,19 @@ export default function PatternCard({
           </p>
         </div>
         {showProgress ? (
-          <MasteryBadge level={masteryLevel} score={progress} />
+          <MasteryBadge
+            level={masteryLevel}
+            levelNumber={levelNumber}
+            score={progress}
+          />
         ) : null}
       </div>
+      {showProgress ? (
+        <p className="mt-3 text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+          Level {levelNumber} · {masteryLevel}
+          {masterTier ? " · Master-tier ready" : ""}
+        </p>
+      ) : null}
       <p className="mt-4 flex-1 text-sm leading-6 text-slate-600">
         {pattern.description}
       </p>

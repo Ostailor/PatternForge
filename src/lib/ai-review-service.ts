@@ -7,6 +7,7 @@ import type {
   AIReviewOutput,
   SavedAIReview,
 } from "@/lib/ai/types";
+import { checkAchievements } from "@/lib/achievements/service";
 import { getPrisma } from "@/lib/prisma";
 
 export type CreateAIReviewInput = {
@@ -181,6 +182,7 @@ export async function createAIReviewForUserProfile(
 
     return aiReview;
   });
+  await checkAchievements(userProfileId);
 
   return {
     ...review,

@@ -8,6 +8,8 @@ import {
   calculateMasteryLevel,
   calculateMasteryScore,
   calculateRetentionScore,
+  getMasteryLevelNumber,
+  isMasterTier,
   summarizeSession,
 } from "./mastery";
 import type { Attempt } from "./types";
@@ -30,6 +32,14 @@ const progress = mergeAttempt(createEmptyProgress(), solvedAttempt);
 assert.equal(progress.attempts["two-sum"].wasPatternCorrect, true);
 assert.equal(calculateMasteryLevel({ solved: 4, attempted: 5, recognized: 4 }), "Sharp");
 assert.equal(calculateMasteryScore([]), 0);
+assert.equal(getMasteryLevelNumber(0), 0);
+assert.equal(getMasteryLevelNumber(1), 1);
+assert.equal(getMasteryLevelNumber(26), 2);
+assert.equal(getMasteryLevelNumber(51), 3);
+assert.equal(getMasteryLevelNumber(76), 4);
+assert.equal(getMasteryLevelNumber(91), 5);
+assert.equal(isMasterTier(75), false);
+assert.equal(isMasterTier(76), true);
 assert.equal(
   calculateMasteryScore({
     attempts: [
