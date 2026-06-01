@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { SignInButton } from "@clerk/nextjs";
+import { useMemo } from "react";
 
 import PatternCard from "@/components/PatternCard";
 import { patterns } from "@/data/patterns";
@@ -9,23 +10,10 @@ import {
   getPatternProgress,
   getProblemCountForPattern,
 } from "@/lib/mastery";
-import {
-  createEmptyProgress,
-  loadProgress,
-  subscribeToProgress,
-} from "@/lib/progress";
-import type { UserProgress } from "@/lib/types";
+import { useAuthProgress } from "@/lib/use-auth-progress";
 
 export default function PatternsPage() {
-  const [progress, setProgress] = useState<UserProgress>(createEmptyProgress);
-
-  useEffect(() => {
-    // localStorage is the temporary data source for v0.0.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setProgress(loadProgress());
-
-    return subscribeToProgress(() => setProgress(loadProgress()));
-  }, []);
+  const { progress, isSignedIn } = useAuthProgress();
 
   const patternRows = useMemo(
     () =>
@@ -52,9 +40,21 @@ export default function PatternsPage() {
             Forge every pattern lane
           </h1>
           <p className="mt-3 text-base leading-7 text-slate-600">
-            Each card combines seeded problem coverage with your local
-            recognition and solve attempts. No attempts yet means 0% mastery.
+            Each card combines seeded problem coverage with authenticated
+            recognition and solve attempts.
           </p>
+          {!isSignedIn ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-bold text-amber-900">
+                Sign in to show your saved mastery and progress on this map.
+              </p>
+              <SignInButton mode="modal">
+                <button className="mt-3 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-teal-700">
+                  Sign in
+                </button>
+              </SignInButton>
+            </div>
+          ) : null}
         </div>
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
@@ -75,6 +75,7 @@ export default function PatternsPage() {
             progress={patternProgress.masteryScore}
             problemCount={problemCount}
             recognitionClueCount={2}
+            showProgress={isSignedIn}
           />
         ))}
       </div>

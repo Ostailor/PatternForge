@@ -1,27 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { patterns } from "@/data/patterns";
-import {
-  createEmptyProgress,
-  loadProgress,
-  subscribeToProgress,
-} from "@/lib/progress";
-import type { UserProgress } from "@/lib/types";
+import { useAuthProgress } from "@/lib/use-auth-progress";
 import { getPatternStats, summarizeSession } from "@/lib/mastery";
 import SessionSummary from "./SessionSummary";
 
 export default function ProgressSnapshot() {
-  const [progress, setProgress] = useState<UserProgress>(createEmptyProgress);
-
-  useEffect(() => {
-    // localStorage is client-only, so the dashboard snapshot hydrates after mount.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setProgress(loadProgress());
-
-    return subscribeToProgress(() => setProgress(loadProgress()));
-  }, []);
+  const { progress, isSignedIn } = useAuthProgress();
 
   const attempts = useMemo(
     () => Object.values(progress.attempts),
@@ -40,7 +27,7 @@ export default function ProgressSnapshot() {
       <SessionSummary summary={summary} />
       <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
-          Local profile
+            {isSignedIn ? "Account profile" : "Signed-out profile"}
         </p>
         <div className="mt-3 grid gap-4 sm:grid-cols-3">
           <div>

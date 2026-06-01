@@ -1,12 +1,14 @@
 "use client";
 
+import { SignInButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { generateDailySession } from "@/lib/session";
-import { subscribeToProgress } from "@/lib/progress";
+import { getAttempts } from "@/lib/progress";
 import type { DailyForgeProblem, DailyForgeSession } from "@/lib/session";
 import type { Problem } from "@/lib/types";
+import { useAuthProgress } from "@/lib/use-auth-progress";
 
 const difficultyStyles: Record<Problem["difficulty"], string> = {
   Easy: "border-teal-200 bg-teal-50 text-teal-700",
@@ -21,6 +23,7 @@ const typeStyles: Record<DailyForgeProblem["type"], string> = {
 };
 
 export default function ForgePage() {
+  const { progress, isSignedIn, isLoading } = useAuthProgress();
   const [session, setSession] = useState<DailyForgeSession>(() =>
     generateDailySession([]),
   );
@@ -29,15 +32,13 @@ export default function ForgePage() {
     const focusPatternId = new URLSearchParams(window.location.search).get(
       "pattern",
     );
+    const attempts = isSignedIn ? getAttempts(progress) : [];
 
-    // localStorage is only available after hydration.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSession(generateDailySession(undefined, focusPatternId ?? undefined));
-
-    return subscribeToProgress(() =>
-      setSession(generateDailySession(undefined, focusPatternId ?? undefined)),
+    setSession(
+      generateDailySession(attempts, focusPatternId ?? undefined),
     );
-  }, []);
+  }, [isSignedIn, progress]);
 
   const firstProblem = session.problems[0]?.problem;
   const estimatedLabel = useMemo(
@@ -63,7 +64,9 @@ export default function ForgePage() {
               {session.goal}
             </p>
             <p className="mt-4 text-sm font-semibold text-slate-400">
-              PatternForge trains recognition before repetition.
+              {isSignedIn
+                ? "PatternForge trains recognition before repetition."
+                : "Sign in before reflection to save these reps."}
             </p>
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               {firstProblem ? (
@@ -103,12 +106,29 @@ export default function ForgePage() {
                 Pattern mode
               </p>
               <p className="mt-3 text-lg font-black text-teal-300">
-                Hidden until quiz
+                {isLoading ? "Loading" : "Hidden until quiz"}
               </p>
             </div>
           </div>
         </div>
       </section>
+
+      {!isSignedIn ? (
+        <section className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-700">
+            Save forge results
+          </p>
+          <p className="mt-2 text-sm font-bold leading-6 text-amber-900">
+            You can inspect the session and open problems while signed out, but
+            attempts are saved only after sign-in.
+          </p>
+          <SignInButton mode="modal">
+            <button className="mt-4 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-teal-700">
+              Sign in
+            </button>
+          </SignInButton>
+        </section>
+      ) : null}
 
       <section className="mt-6 grid gap-5 lg:grid-cols-3">
         {session.problems.map((item, index) => (

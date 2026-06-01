@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Difficulty {
+  Easy
+  Medium
+  Hard
+}
+
+enum SolvedStatus {
+  Solved
+  PartiallySolved
+  NotSolved
+}
+
+model UserProfile {
+  id          String    @id @default(cuid())
+  authUserId  String    @unique
+  displayName String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  attempts    Attempt[]
+}
+
+model Pattern {
+  id               String           @id
+  name             String
+  category         String
+  description      String           @db.Text
+  recognitionClues String[]         @default([])
+  templateSummary  String           @db.Text
+  commonMistakes   String[]         @default([])
+  levelOrder       Int
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  problemPatterns  ProblemPattern[]
+  selectedAttempts Attempt[]        @relation("SelectedPattern")
+  correctAttempts  Attempt[]        @relation("CorrectPattern")
+
+  @@index([levelOrder])
+}
+
+model Problem {
+  id               String           @id
+  title            String
+  url              String           @unique
+  difficulty       Difficulty
+  estimatedMinutes Int
+  recognitionClues String[]         @default([])
+  commonMistakes   String[]         @default([])
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  problemPatterns  ProblemPattern[]
+  attempts         Attempt[]
+}
+
+model ProblemPattern {
+  id        String  @id @default(cuid())
+  problemId String
+  patternId String
+  isPrimary Boolean @default(false)
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  pattern   Pattern @relation(fields: [patternId], references: [id], onDelete: Restrict)
+
+  @@unique([problemId, patternId])
+  @@index([problemId])
+  @@index([patternId])
+  @@index([problemId, isPrimary])
+}
+
+model Attempt {
+  id                String       @id @default(cuid())
+  userProfileId     String
+  problemId         String
+  selectedPatternId String
+  correctPatternId  String
+  wasPatternCorrect Boolean
+  solvedStatus      SolvedStatus
+  timeSpentMinutes  Int
+  confidence        Int
+  reflection        String       @db.Text
+  createdAt         DateTime     @default(now())
+  userProfile       UserProfile  @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  problem           Problem      @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  selectedPattern   Pattern      @relation("SelectedPattern", fields: [selectedPatternId], references: [id], onDelete: Restrict)
+  correctPattern    Pattern      @relation("CorrectPattern", fields: [correctPatternId], references: [id], onDelete: Restrict)
+
+  @@index([userProfileId])
+  @@index([problemId])
+  @@index([selectedPatternId])
+  @@index([correctPatternId])
+  @@index([userProfileId, problemId])
+  @@index([userProfileId, createdAt])
+}

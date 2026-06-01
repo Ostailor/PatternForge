@@ -17,6 +17,7 @@ type PatternCardProps = {
   progress?: number;
   problemCount?: number;
   recognitionClueCount?: number;
+  showProgress?: boolean;
 };
 
 export default function PatternCard({
@@ -25,6 +26,7 @@ export default function PatternCard({
   progress = 0,
   problemCount = 0,
   recognitionClueCount = 3,
+  showProgress = true,
 }: PatternCardProps) {
   const accent = accents[(pattern.levelOrder - 1) % accents.length];
 
@@ -40,7 +42,9 @@ export default function PatternCard({
             {pattern.category} · {problemCount} seeded problems
           </p>
         </div>
-        <MasteryBadge level={masteryLevel} score={progress} />
+        {showProgress ? (
+          <MasteryBadge level={masteryLevel} score={progress} />
+        ) : null}
       </div>
       <p className="mt-4 flex-1 text-sm leading-6 text-slate-600">
         {pattern.description}
@@ -55,9 +59,15 @@ export default function PatternCard({
           </p>
         ))}
       </div>
-      <div className="mt-6">
-        <ProgressBar value={progress} label="Mastery" />
-      </div>
+      {showProgress ? (
+        <div className="mt-6">
+          <ProgressBar value={progress} label="Mastery" />
+        </div>
+      ) : (
+        <p className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+          Sign in to track mastery.
+        </p>
+      )}
       <Link
         href={`/patterns/${pattern.id}`}
         className="mt-5 inline-flex justify-center rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-teal-700"

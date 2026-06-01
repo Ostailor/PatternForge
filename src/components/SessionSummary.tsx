@@ -52,7 +52,7 @@ export default function SessionSummary({
           </div>
         </div>
         <p className="mt-5 rounded-lg bg-teal-50 p-4 text-sm font-bold text-teal-700">
-          Saved locally. Correct pattern: {correctPattern?.name ?? "Unknown"}.
+          Saved to your account. Correct pattern: {correctPattern?.name ?? "Unknown"}.
         </p>
       </section>
     );

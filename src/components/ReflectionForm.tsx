@@ -1,9 +1,11 @@
 "use client";
 
+import { SignInButton, useAuth } from "@clerk/nextjs";
 import { useState } from "react";
 
-import { saveAttempt } from "@/lib/progress";
+import { saveAttemptAction } from "@/app/practice-actions";
 import type { Attempt, Confidence, Problem, SolvedStatus } from "@/lib/types";
+import { notifyAccountProgressChanged } from "@/lib/use-auth-progress";
 
 type ReflectionFormProps = {
   problem: Problem;
@@ -18,6 +20,7 @@ export default function ReflectionForm({
   wasPatternCorrect,
   onSaved,
 }: ReflectionFormProps) {
+  const { isLoaded, isSignedIn } = useAuth();
   const [solvedStatus, setSolvedStatus] = useState<SolvedStatus>("Not Solved");
   const [timeSpentMinutes, setTimeSpentMinutes] = useState(
     problem.estimatedMinutes,
@@ -26,8 +29,17 @@ export default function ReflectionForm({
   const [recognizedClue, setRecognizedClue] = useState("");
   const [mistake, setMistake] = useState("");
   const [nextMemory, setNextMemory] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  function saveReflection() {
+  async function saveReflection() {
+    if (isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+    setErrorMessage("");
+
     const reflection = [
       `Clue: ${recognizedClue.trim() || "Not recorded"}`,
       `Mistake: ${mistake.trim() || "Not recorded"}`,
@@ -45,8 +57,21 @@ export default function ReflectionForm({
       createdAt: new Date().toISOString(),
     };
 
-    saveAttempt(attempt);
-    onSaved?.(attempt);
+    const result = await saveAttemptAction(attempt);
+
+    setIsSaving(false);
+
+    if (result.status === "saved") {
+      notifyAccountProgressChanged();
+      onSaved?.(result.attempt);
+      return;
+    }
+
+    setErrorMessage(
+      result.status === "unauthenticated"
+        ? "Sign in to save this attempt."
+        : result.message,
+    );
   }
 
   return (
@@ -134,13 +159,35 @@ export default function ReflectionForm({
           />
         </label>
 
-        <button
-          type="button"
-          onClick={saveReflection}
-          className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700"
-        >
-          Save attempt
-        </button>
+        {errorMessage ? (
+          <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">
+            {errorMessage}
+          </p>
+        ) : null}
+
+        {isLoaded && !isSignedIn ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-bold text-amber-900">
+              Sign in to save attempts and build persistent mastery.
+            </p>
+            <SignInButton mode="modal">
+              <button className="mt-3 rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700">
+                Sign in to save attempt
+              </button>
+            </SignInButton>
+          </div>
+        ) : null}
+
+        {isSignedIn ? (
+          <button
+            type="button"
+            onClick={saveReflection}
+            disabled={isSaving}
+            className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? "Saving..." : "Save attempt"}
+          </button>
+        ) : null}
       </div>
     </section>
   );
