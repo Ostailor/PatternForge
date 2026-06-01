@@ -55,6 +55,9 @@ export type PatternProgress = {
   solvedCount: number;
   attemptedCount: number;
   masteryScore: number;
+  explanationScore?: number | null;
+  retentionScore?: number | null;
+  confidenceScore?: number | null;
   lastPracticedAt?: string;
 };
 

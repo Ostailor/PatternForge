@@ -90,6 +90,25 @@ test("AI review saves review, mistake, and flashcard for the owning user only", 
   assert.equal(await getPrisma().aIReview.count({ where: { userProfileId: owner.id } }), 1);
   assert.equal(await getPrisma().mistake.count({ where: { userProfileId: owner.id } }), 1);
   assert.equal(await getPrisma().flashcard.count({ where: { userProfileId: owner.id } }), 1);
+  const [savedMistake, savedFlashcard] = await Promise.all([
+    getPrisma().mistake.findFirstOrThrow({ where: { userProfileId: owner.id } }),
+    getPrisma().flashcard.findFirstOrThrow({ where: { userProfileId: owner.id } }),
+  ]);
+
+  assert.ok(savedMistake.reviewDueAt instanceof Date);
+  assert.equal(savedMistake.lastReviewedAt, null);
+  assert.equal(savedMistake.intervalDays, 0);
+  assert.equal(savedMistake.easeFactor, 2.5);
+  assert.equal(savedMistake.repetitions, 0);
+  assert.equal(savedMistake.lapses, 0);
+  assert.equal(savedMistake.status, "active");
+  assert.ok(savedFlashcard.reviewDueAt instanceof Date);
+  assert.equal(savedFlashcard.lastReviewedAt, null);
+  assert.equal(savedFlashcard.intervalDays, 0);
+  assert.equal(savedFlashcard.easeFactor, 2.5);
+  assert.equal(savedFlashcard.repetitions, 0);
+  assert.equal(savedFlashcard.lapses, 0);
+  assert.equal(savedFlashcard.status, "active");
 
   await assert.rejects(
     () =>

@@ -19,6 +19,18 @@ enum SolvedStatus {
   NotSolved
 }
 
+enum ReviewItemType {
+  Flashcard
+  Mistake
+}
+
+enum ReviewRating {
+  Again
+  Hard
+  Good
+  Easy
+}
+
 model UserProfile {
   id          String      @id @default(cuid())
   authUserId  String      @unique
@@ -29,6 +41,7 @@ model UserProfile {
   aiReviews   AIReview[]
   mistakes    Mistake[]
   flashcards  Flashcard[]
+  reviewLogs  ReviewLog[]
 }
 
 model Pattern {
@@ -139,24 +152,33 @@ model AIReview {
 }
 
 model Mistake {
-  id            String      @id @default(cuid())
-  userProfileId String
-  attemptId     String
-  problemId     String
-  patternId     String
-  mistakeType   String
-  description   String      @db.Text
-  correction    String      @db.Text
-  createdAt     DateTime    @default(now())
-  userProfile   UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
-  attempt       Attempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  problem       Problem     @relation(fields: [problemId], references: [id], onDelete: Restrict)
-  pattern       Pattern     @relation(fields: [patternId], references: [id], onDelete: Restrict)
+  id             String      @id @default(cuid())
+  userProfileId  String
+  attemptId      String
+  problemId      String
+  patternId      String
+  mistakeType    String
+  description    String      @db.Text
+  correction     String      @db.Text
+  reviewDueAt    DateTime
+  lastReviewedAt DateTime?
+  intervalDays   Int         @default(0)
+  easeFactor     Float       @default(2.5)
+  repetitions    Int         @default(0)
+  lapses         Int         @default(0)
+  status         String      @default("active")
+  createdAt      DateTime    @default(now())
+  userProfile    UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  attempt        Attempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  problem        Problem     @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  pattern        Pattern     @relation(fields: [patternId], references: [id], onDelete: Restrict)
+  reviewLogs     ReviewLog[]
 
   @@index([userProfileId])
   @@index([attemptId])
   @@index([problemId])
   @@index([patternId])
+  @@index([reviewDueAt])
   @@index([createdAt])
 }
 
@@ -167,13 +189,42 @@ model Flashcard {
   patternId       String
   front           String      @db.Text
   back            String      @db.Text
+  reviewDueAt     DateTime
+  lastReviewedAt  DateTime?
+  intervalDays    Int         @default(0)
+  easeFactor      Float       @default(2.5)
+  repetitions     Int         @default(0)
+  lapses          Int         @default(0)
+  status          String      @default("active")
   createdAt       DateTime    @default(now())
   userProfile     UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
   sourceAttempt   Attempt?    @relation(fields: [sourceAttemptId], references: [id], onDelete: SetNull)
   pattern         Pattern     @relation(fields: [patternId], references: [id], onDelete: Restrict)
+  reviewLogs      ReviewLog[]
 
   @@index([userProfileId])
   @@index([sourceAttemptId])
   @@index([patternId])
+  @@index([reviewDueAt])
   @@index([createdAt])
+}
+
+model ReviewLog {
+  id                   String         @id @default(cuid())
+  userProfileId        String
+  flashcardId          String?
+  mistakeId            String?
+  itemType             ReviewItemType
+  rating               ReviewRating
+  previousIntervalDays Int
+  nextIntervalDays     Int
+  reviewedAt           DateTime       @default(now())
+  userProfile          UserProfile    @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  flashcard            Flashcard?     @relation(fields: [flashcardId], references: [id], onDelete: SetNull)
+  mistake              Mistake?       @relation(fields: [mistakeId], references: [id], onDelete: SetNull)
+
+  @@index([userProfileId])
+  @@index([reviewedAt])
+  @@index([flashcardId])
+  @@index([mistakeId])
 }

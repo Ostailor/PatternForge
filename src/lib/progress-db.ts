@@ -2,10 +2,17 @@ import {
   SolvedStatus as PrismaSolvedStatus,
   type Attempt as DbAttempt,
 } from "@/generated/prisma/client";
-import { getGamificationStats } from "@/lib/gamification";
+import { patterns } from "@/data/patterns";
+import {
+  getGamificationStats,
+  type ReviewXpActivity,
+} from "@/lib/gamification";
 import { getPatternProgress } from "@/lib/mastery";
+import { calculateMemoryStreak } from "@/lib/memory-streak";
 import { getPrisma } from "@/lib/prisma";
 import { progressFromAttempts } from "@/lib/progress";
+import { getReviewStats, type ReviewStats } from "@/lib/review/queue";
+import type { ReviewRating } from "@/lib/review/types";
 import type {
   Attempt,
   Confidence,
@@ -29,6 +36,8 @@ export type UserProgressSnapshot = {
   progress: UserProgress | null;
   dashboardStats: ReturnType<typeof getGamificationStats> | null;
   patternProgress: PatternProgress | null;
+  patternProgressById: Record<string, PatternProgress> | null;
+  reviewStats: (ReviewStats & { memoryStreak: number }) | null;
 };
 
 export type ImportAttemptsResult = {
@@ -87,6 +96,107 @@ function normalizeCreatedAt(createdAt?: string): string | undefined {
   return date.toISOString();
 }
 
+type PatternMasteryInputs = {
+  explanationScores: number[];
+  retentionRatings: ReviewRating[];
+};
+
+const MAX_PATTERN_SIGNAL_COUNT = 20;
+const MAX_RECENT_REVIEW_LOGS = 1000;
+const MAX_RECENT_AI_REVIEWS = 500;
+const MAX_XP_REVIEW_LOGS = 5000;
+
+function createPatternMasteryInputMap(): Map<string, PatternMasteryInputs> {
+  return new Map(
+    patterns.map((pattern) => [
+      pattern.id,
+      {
+        explanationScores: [],
+        retentionRatings: [],
+      },
+    ]),
+  );
+}
+
+async function getPatternMasteryInputMap(
+  userProfileId: string,
+): Promise<Map<string, PatternMasteryInputs>> {
+  const prisma = getPrisma();
+  const inputMap = createPatternMasteryInputMap();
+  const [aiReviews, reviewLogs] = await Promise.all([
+    prisma.aIReview.findMany({
+      where: { userProfileId },
+      select: {
+        patternId: true,
+        explanationScore: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: MAX_RECENT_AI_REVIEWS,
+    }),
+    prisma.reviewLog.findMany({
+      where: { userProfileId },
+      select: {
+        rating: true,
+        flashcard: {
+          select: {
+            patternId: true,
+          },
+        },
+        mistake: {
+          select: {
+            patternId: true,
+          },
+        },
+      },
+      orderBy: { reviewedAt: "desc" },
+      take: MAX_RECENT_REVIEW_LOGS,
+    }),
+  ]);
+
+  for (const review of aiReviews) {
+    const input = inputMap.get(review.patternId);
+
+    if (!input || input.explanationScores.length >= MAX_PATTERN_SIGNAL_COUNT) {
+      continue;
+    }
+
+    input.explanationScores.push(review.explanationScore);
+  }
+
+  for (const reviewLog of reviewLogs) {
+    const patternId =
+      reviewLog.flashcard?.patternId ?? reviewLog.mistake?.patternId;
+    const input = patternId ? inputMap.get(patternId) : undefined;
+
+    if (!input || input.retentionRatings.length >= MAX_PATTERN_SIGNAL_COUNT) {
+      continue;
+    }
+
+    input.retentionRatings.push(reviewLog.rating);
+  }
+
+  return inputMap;
+}
+
+function getPatternProgressById(
+  progress: UserProgress,
+  inputMap: Map<string, PatternMasteryInputs>,
+): Record<string, PatternProgress> {
+  return Object.fromEntries(
+    patterns.map((pattern) => {
+      const input = inputMap.get(pattern.id);
+
+      return [
+        pattern.id,
+        getPatternProgress(pattern.id, progress, {
+          explanationScores: input?.explanationScores,
+          retentionRatings: input?.retentionRatings,
+        }),
+      ];
+    }),
+  );
+}
+
 function getImportKey({
   problemId,
   selectedPatternId,
@@ -104,6 +214,80 @@ function getImportKey({
     solvedStatus,
     normalizeCreatedAt(createdAt) ?? "no-date",
   ].join("|");
+}
+
+async function getReviewXpActivities(
+  userProfileId: string,
+): Promise<ReviewXpActivity[]> {
+  const reviewLogs = await getPrisma().reviewLog.findMany({
+    where: { userProfileId },
+    select: {
+      itemType: true,
+      rating: true,
+      reviewedAt: true,
+      mistakeId: true,
+      mistake: {
+        select: {
+          lapses: true,
+        },
+      },
+    },
+    orderBy: { reviewedAt: "asc" },
+    take: MAX_XP_REVIEW_LOGS,
+  });
+  const mistakeAgainCounts = new Map<string, number>();
+  const mistakeCurrentLapses = new Map<string, number>();
+
+  for (const reviewLog of reviewLogs) {
+    if (reviewLog.itemType !== "Mistake" || !reviewLog.mistakeId) {
+      continue;
+    }
+
+    mistakeCurrentLapses.set(
+      reviewLog.mistakeId,
+      reviewLog.mistake?.lapses ?? 0,
+    );
+
+    if (reviewLog.rating === "Again") {
+      mistakeAgainCounts.set(
+        reviewLog.mistakeId,
+        (mistakeAgainCounts.get(reviewLog.mistakeId) ?? 0) + 1,
+      );
+    }
+  }
+  const mistakePriorLapses = new Map(
+    Array.from(mistakeCurrentLapses.entries()).map(
+      ([mistakeId, currentLapses]) => [
+        mistakeId,
+        Math.max(0, currentLapses - (mistakeAgainCounts.get(mistakeId) ?? 0)),
+      ],
+    ),
+  );
+
+  return reviewLogs.map((reviewLog) => {
+    const priorLapses = reviewLog.mistakeId
+      ? (mistakePriorLapses.get(reviewLog.mistakeId) ?? 0)
+      : 0;
+
+    if (
+      reviewLog.itemType === "Mistake" &&
+      reviewLog.rating === "Again" &&
+      reviewLog.mistakeId
+    ) {
+      mistakePriorLapses.set(
+        reviewLog.mistakeId,
+        priorLapses + 1,
+      );
+    }
+
+    return {
+      itemType: reviewLog.itemType,
+      rating: reviewLog.rating,
+      reviewedAt: reviewLog.reviewedAt,
+      mistakeHadPriorLapse:
+        reviewLog.itemType === "Mistake" ? priorLapses > 0 : false,
+    };
+  });
 }
 
 export async function getCurrentUserAttempts(): Promise<Attempt[] | null> {
@@ -134,13 +318,22 @@ export async function getCurrentUserProgress() {
 export async function getCurrentUserPatternProgress(
   patternId: string,
 ): Promise<PatternProgress | null> {
-  const progress = await getCurrentUserProgress();
+  const attempts = await getCurrentUserAttempts();
 
-  if (!progress) {
+  if (!attempts) {
     return null;
   }
 
-  return getPatternProgress(patternId, progress);
+  const userProfile = await ensureCurrentUserProfile();
+  const progress = progressFromAttempts(attempts);
+  const patternInputMap = userProfile
+    ? await getPatternMasteryInputMap(userProfile.id)
+    : createPatternMasteryInputMap();
+
+  return getPatternProgress(patternId, progress, {
+    explanationScores: patternInputMap.get(patternId)?.explanationScores,
+    retentionRatings: patternInputMap.get(patternId)?.retentionRatings,
+  });
 }
 
 export async function getCurrentUserDashboardStats() {
@@ -150,7 +343,22 @@ export async function getCurrentUserDashboardStats() {
     return null;
   }
 
-  return getGamificationStats(attempts);
+  const userProfile = await ensureCurrentUserProfile();
+
+  if (!userProfile) {
+    return getGamificationStats(attempts);
+  }
+
+  const [reviewStats, reviewActivities] = await Promise.all([
+    getReviewStats(userProfile.id),
+    getReviewXpActivities(userProfile.id),
+  ]);
+
+  return getGamificationStats(attempts, {
+    reviewActivities,
+    clearedDueReviewsToday:
+      reviewStats.reviewedTodayCount > 0 && reviewStats.totalDueCount === 0,
+  });
 }
 
 export async function getCurrentUserProgressSnapshot(
@@ -163,15 +371,46 @@ export async function getCurrentUserProgressSnapshot(
       progress: null,
       dashboardStats: null,
       patternProgress: null,
+      patternProgressById: null,
+      reviewStats: null,
     };
   }
 
   const progress = progressFromAttempts(attempts);
+  const userProfile = await ensureCurrentUserProfile();
+  const [reviewStats, reviewActivities, patternInputMap] = userProfile
+    ? await Promise.all([
+        getReviewStats(userProfile.id),
+        getReviewXpActivities(userProfile.id),
+        getPatternMasteryInputMap(userProfile.id),
+      ])
+    : [null, [], createPatternMasteryInputMap()];
+  const patternProgressById = getPatternProgressById(progress, patternInputMap);
 
   return {
     progress,
-    dashboardStats: getGamificationStats(attempts),
-    patternProgress: patternId ? getPatternProgress(patternId, progress) : null,
+    dashboardStats: getGamificationStats(attempts, {
+      reviewActivities,
+      clearedDueReviewsToday:
+        reviewStats !== null &&
+        reviewStats.reviewedTodayCount > 0 &&
+        reviewStats.totalDueCount === 0,
+    }),
+    patternProgress: patternId
+      ? (patternProgressById[patternId] ?? null)
+      : null,
+    patternProgressById,
+    reviewStats: reviewStats
+      ? {
+          ...reviewStats,
+          memoryStreak: calculateMemoryStreak({
+            attempts,
+            reviewDates: reviewActivities.map(
+              (reviewActivity) => new Date(reviewActivity.reviewedAt),
+            ),
+          }),
+        }
+      : null,
   };
 }
 

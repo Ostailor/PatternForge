@@ -3,7 +3,13 @@ import { strict as assert } from "node:assert";
 import { patterns } from "@/data/patterns";
 import { problems } from "@/data/problems";
 import { createEmptyProgress, mergeAttempt } from "./progress";
-import { calculateMasteryLevel, summarizeSession } from "./mastery";
+import {
+  calculateConfidenceScore,
+  calculateMasteryLevel,
+  calculateMasteryScore,
+  calculateRetentionScore,
+  summarizeSession,
+} from "./mastery";
 import type { Attempt } from "./types";
 
 const solvedAttempt: Attempt = {
@@ -23,6 +29,34 @@ const progress = mergeAttempt(createEmptyProgress(), solvedAttempt);
 
 assert.equal(progress.attempts["two-sum"].wasPatternCorrect, true);
 assert.equal(calculateMasteryLevel({ solved: 4, attempted: 5, recognized: 4 }), "Sharp");
+assert.equal(calculateMasteryScore([]), 0);
+assert.equal(
+  calculateMasteryScore({
+    attempts: [
+      {
+        ...solvedAttempt,
+        solvedStatus: "Not Solved",
+        confidence: 3,
+      },
+    ],
+    explanationScores: [8],
+    retentionRatings: ["Good"],
+  }),
+  67,
+);
+assert.equal(
+  calculateMasteryScore([
+    {
+      ...solvedAttempt,
+      solvedStatus: "Not Solved",
+      confidence: 3,
+    },
+  ]),
+  58,
+);
+assert.equal(calculateRetentionScore(["Again", "Hard", "Good", "Easy"]), 59);
+assert.equal(calculateConfidenceScore([{ ...solvedAttempt, confidence: 1 }]), 0);
+assert.equal(calculateConfidenceScore([{ ...solvedAttempt, confidence: 5 }]), 100);
 assert.deepEqual(summarizeSession([solvedAttempt]), {
   attempted: 1,
   solved: 1,

@@ -13,12 +13,14 @@ import {
 import { useAuthProgress } from "@/lib/use-auth-progress";
 
 export default function PatternsPage() {
-  const { progress, isSignedIn } = useAuthProgress();
+  const { progress, patternProgressById, isSignedIn } = useAuthProgress();
 
   const patternRows = useMemo(
     () =>
       patterns.map((pattern) => {
-        const patternProgress = getPatternProgress(pattern.id, progress);
+        const patternProgress =
+          patternProgressById?.[pattern.id] ??
+          getPatternProgress(pattern.id, progress);
 
         return {
           pattern,
@@ -26,7 +28,7 @@ export default function PatternsPage() {
           problemCount: getProblemCountForPattern(pattern.id),
         };
       }),
-    [progress],
+    [patternProgressById, progress],
   );
 
   return (

@@ -1,5 +1,10 @@
 import { patterns } from "@/data/patterns";
 import { calculateMasteryScore } from "@/lib/mastery";
+import {
+  calculateConsecutiveDayStreak,
+  toLocalDateKey,
+} from "@/lib/memory-streak";
+import type { ReviewItemType, ReviewRating } from "@/lib/review/types";
 import type { Attempt, Pattern } from "./types";
 
 export type PatternStanding = {
@@ -20,6 +25,18 @@ export type GamificationStats = {
   weakestPattern?: PatternStanding;
 };
 
+export type ReviewXpActivity = {
+  itemType: ReviewItemType;
+  rating: ReviewRating;
+  reviewedAt: Date | string;
+  mistakeHadPriorLapse?: boolean;
+};
+
+export type GamificationStatsOptions = {
+  reviewActivities?: ReviewXpActivity[];
+  clearedDueReviewsToday?: boolean;
+};
+
 export function calculateAttemptXp(attempt: Attempt): number {
   return (
     5 +
@@ -30,29 +47,13 @@ export function calculateAttemptXp(attempt: Attempt): number {
   );
 }
 
-function toLocalDateKey(createdAt: string): string | undefined {
-  const date = new Date(createdAt);
-
-  if (Number.isNaN(date.getTime())) {
-    return createdAt.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
-  }
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(dateKey: string, days: number): string {
-  const date = new Date(`${dateKey}T00:00:00`);
-  date.setDate(date.getDate() + days);
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+export function calculateReviewXp(activity: ReviewXpActivity): number {
+  return (
+    5 +
+    (activity.rating === "Good" ? 5 : 0) +
+    (activity.rating === "Easy" ? 10 : 0) +
+    (activity.itemType === "Mistake" && activity.mistakeHadPriorLapse ? 15 : 0)
+  );
 }
 
 export function getUniquePracticeDates(attempts: Attempt[]): string[] {
@@ -65,23 +66,18 @@ export function getUniquePracticeDates(attempts: Attempt[]): string[] {
   ).sort();
 }
 
-export function calculateCurrentStreak(attempts: Attempt[]): number {
-  const practiceDates = getUniquePracticeDates(attempts);
+export function calculateCurrentStreak(
+  attempts: Attempt[],
+  reviewActivities: ReviewXpActivity[] = [],
+): number {
+  const activityDates = [
+    ...getUniquePracticeDates(attempts),
+    ...reviewActivities
+      .map((activity) => toLocalDateKey(activity.reviewedAt))
+      .filter((dateKey): dateKey is string => Boolean(dateKey)),
+  ];
 
-  if (practiceDates.length === 0) {
-    return 0;
-  }
-
-  const dateSet = new Set(practiceDates);
-  let streak = 1;
-  let cursor = practiceDates.at(-1) as string;
-
-  while (dateSet.has(addDays(cursor, -1))) {
-    streak += 1;
-    cursor = addDays(cursor, -1);
-  }
-
-  return streak;
+  return calculateConsecutiveDayStreak(activityDates);
 }
 
 function getPatternStandings(attempts: Attempt[]): PatternStanding[] {
@@ -100,7 +96,9 @@ function getPatternStandings(attempts: Attempt[]): PatternStanding[] {
 
 export function getGamificationStats(
   attempts: Attempt[],
+  options: GamificationStatsOptions = {},
 ): GamificationStats {
+  const reviewActivities = options.reviewActivities ?? [];
   const attemptedProblemIds = new Set(
     attempts.map((attempt) => attempt.problemId),
   );
@@ -115,15 +113,23 @@ export function getGamificationStats(
   const attemptedPatternStandings = getPatternStandings(attempts).filter(
     (standing) => standing.attempts > 0,
   );
+  const attemptXp = attempts.reduce(
+    (total, attempt) => total + calculateAttemptXp(attempt),
+    0,
+  );
+  const reviewXp = reviewActivities.reduce(
+    (total, activity) => total + calculateReviewXp(activity),
+    0,
+  );
 
   return {
-    xp: attempts.reduce((total, attempt) => total + calculateAttemptXp(attempt), 0),
+    xp: attemptXp + reviewXp + (options.clearedDueReviewsToday ? 10 : 0),
     totalAttempts: attempts.length,
     problemsAttempted: attemptedProblemIds.size,
     problemsSolved: solvedProblemIds.size,
     recognitionAccuracy:
       attempts.length === 0 ? 0 : Math.round((recognized / attempts.length) * 100),
-    currentStreak: calculateCurrentStreak(attempts),
+    currentStreak: calculateCurrentStreak(attempts, reviewActivities),
     masteredPatternsCount: getPatternStandings(attempts).filter(
       (standing) => standing.masteryScore >= 91,
     ).length,

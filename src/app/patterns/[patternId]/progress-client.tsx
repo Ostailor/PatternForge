@@ -4,18 +4,22 @@ import { SignInButton } from "@clerk/nextjs";
 
 import MasteryBadge from "@/components/MasteryBadge";
 import ProgressBar from "@/components/ProgressBar";
-import {
-  getMasteryLevel,
-  getPatternProgress,
-} from "@/lib/mastery";
+import { getMasteryLevel, getPatternProgress } from "@/lib/mastery";
 import { useAuthProgress } from "@/lib/use-auth-progress";
+
 type PatternProgressProps = {
   patternId: string;
 };
 
 export function PatternMasteryBadge({ patternId }: PatternProgressProps) {
-  const { isSignedIn, progress: userProgress } = useAuthProgress();
-  const progress = getPatternProgress(patternId, userProgress);
+  const {
+    isSignedIn,
+    progress: userProgress,
+    patternProgressById,
+  } = useAuthProgress();
+  const progress =
+    patternProgressById?.[patternId] ??
+    getPatternProgress(patternId, userProgress);
 
   if (!isSignedIn) {
     return null;
@@ -30,8 +34,14 @@ export function PatternMasteryBadge({ patternId }: PatternProgressProps) {
 }
 
 export function PatternMasteryBar({ patternId }: PatternProgressProps) {
-  const { isSignedIn, progress: userProgress } = useAuthProgress();
-  const progress = getPatternProgress(patternId, userProgress);
+  const {
+    isSignedIn,
+    progress: userProgress,
+    patternProgressById,
+  } = useAuthProgress();
+  const progress =
+    patternProgressById?.[patternId] ??
+    getPatternProgress(patternId, userProgress);
 
   if (!isSignedIn) {
     return (
@@ -53,8 +63,14 @@ export function PatternMasteryBar({ patternId }: PatternProgressProps) {
 }
 
 export function PatternProgressPanel({ patternId }: PatternProgressProps) {
-  const { isSignedIn, progress: userProgress } = useAuthProgress();
-  const progress = getPatternProgress(patternId, userProgress);
+  const {
+    isSignedIn,
+    progress: userProgress,
+    patternProgressById,
+  } = useAuthProgress();
+  const progress =
+    patternProgressById?.[patternId] ??
+    getPatternProgress(patternId, userProgress);
   const recognitionRate =
     progress.recognitionAttempts === 0
       ? 0

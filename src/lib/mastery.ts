@@ -1,4 +1,5 @@
 import { problems } from "@/data/problems";
+import type { ReviewRating } from "@/lib/review/types";
 import type {
   Attempt,
   ForgeSessionSummary,
@@ -8,7 +9,90 @@ import type {
   UserProgress,
 } from "./types";
 
-export function calculateMasteryScore(attempts: Attempt[]): number {
+const RECOGNITION_WEIGHT = 0.35;
+const SOLVE_WEIGHT = 0.25;
+const EXPLANATION_WEIGHT = 0.15;
+const RETENTION_WEIGHT = 0.2;
+const CONFIDENCE_WEIGHT = 0.05;
+const REDISTRIBUTION_BASE_WEIGHT = RECOGNITION_WEIGHT + SOLVE_WEIGHT;
+
+export type MasteryScoreInput = {
+  attempts: Attempt[];
+  explanationScores?: number[];
+  retentionRatings?: ReviewRating[];
+};
+
+function clampScore(score: number): number {
+  if (!Number.isFinite(score)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function normalizeAIReviewScore(score: number): number {
+  if (!Number.isFinite(score)) {
+    return 0;
+  }
+
+  return score <= 10 ? clampScore(score * 10) : clampScore(score);
+}
+
+function average(scores: number[]): number | null {
+  const validScores = scores.filter((score) => Number.isFinite(score));
+
+  if (validScores.length === 0) {
+    return null;
+  }
+
+  return (
+    validScores.reduce((total, score) => total + score, 0) /
+    validScores.length
+  );
+}
+
+export function getReviewRatingScore(rating: ReviewRating): number {
+  switch (rating) {
+    case "Again":
+      return 0;
+    case "Hard":
+      return 50;
+    case "Good":
+      return 85;
+    case "Easy":
+      return 100;
+  }
+}
+
+export function calculateRetentionScore(
+  retentionRatings: ReviewRating[] = [],
+): number | null {
+  const retentionScore = average(retentionRatings.map(getReviewRatingScore));
+
+  return retentionScore === null ? null : Math.round(retentionScore);
+}
+
+export function calculateExplanationScore(
+  explanationScores: number[] = [],
+): number | null {
+  const explanationScore = average(explanationScores.map(normalizeAIReviewScore));
+
+  return explanationScore === null ? null : Math.round(explanationScore);
+}
+
+export function calculateConfidenceScore(attempts: Attempt[]): number {
+  const confidenceScore = average(
+    attempts.map((attempt) => ((attempt.confidence - 1) / 4) * 100),
+  );
+
+  return confidenceScore === null ? 0 : Math.round(clampScore(confidenceScore));
+}
+
+export function calculateMasteryScore(
+  input: Attempt[] | MasteryScoreInput,
+): number {
+  const attempts = Array.isArray(input) ? input : input.attempts;
+
   if (attempts.length === 0) {
     return 0;
   }
@@ -21,8 +105,43 @@ export function calculateMasteryScore(attempts: Attempt[]): number {
   ).length;
   const recognitionScore = recognitionCorrect / attempts.length;
   const solveScore = solvedCount / attempts.length;
+  const explanationScore = Array.isArray(input)
+    ? null
+    : calculateExplanationScore(input.explanationScores);
+  const retentionScore = Array.isArray(input)
+    ? null
+    : calculateRetentionScore(input.retentionRatings);
+  const confidenceScore = calculateConfidenceScore(attempts);
 
-  return Math.round((recognitionScore * 0.6 + solveScore * 0.4) * 100);
+  let recognitionWeight = RECOGNITION_WEIGHT;
+  let solveWeight = SOLVE_WEIGHT;
+  let explanationWeight = EXPLANATION_WEIGHT;
+  let retentionWeight = RETENTION_WEIGHT;
+
+  function redistributeToAttemptSignals(weight: number) {
+    recognitionWeight +=
+      weight * (RECOGNITION_WEIGHT / REDISTRIBUTION_BASE_WEIGHT);
+    solveWeight += weight * (SOLVE_WEIGHT / REDISTRIBUTION_BASE_WEIGHT);
+  }
+
+  if (explanationScore === null) {
+    redistributeToAttemptSignals(explanationWeight);
+    explanationWeight = 0;
+  }
+
+  if (retentionScore === null) {
+    redistributeToAttemptSignals(retentionWeight);
+    retentionWeight = 0;
+  }
+
+  const weightedScore =
+    recognitionScore * 100 * recognitionWeight +
+    solveScore * 100 * solveWeight +
+    (explanationScore ?? 0) * explanationWeight +
+    (retentionScore ?? 0) * retentionWeight +
+    confidenceScore * CONFIDENCE_WEIGHT;
+
+  return Math.round(clampScore(weightedScore));
 }
 
 export function getMasteryLevel(masteryScore: number): MasteryLevel {
@@ -90,19 +209,30 @@ export function getPatternProgressPercent(stats: PatternStats): number {
     return 0;
   }
 
-  const recognitionScore = stats.recognized / stats.attempted;
-  const solveScore = stats.solved / stats.attempted;
-
-  return Math.round((recognitionScore * 0.6 + solveScore * 0.4) * 100);
+  return calculateMasteryScore(
+    Array.from({ length: stats.attempted }, (_, index): Attempt => ({
+      id: `stats-${index}`,
+      problemId: `stats-${index}`,
+      selectedPatternId: "",
+      correctPatternId: "",
+      wasPatternCorrect: index < stats.recognized,
+      solvedStatus: index < stats.solved ? "Solved" : "Not Solved",
+      timeSpentMinutes: 0,
+      confidence: 3,
+      reflection: "",
+      createdAt: "",
+    })),
+  );
 }
 
 export function getPatternProgress(
   patternId: string,
   progress: UserProgress,
+  masteryInput?: Omit<MasteryScoreInput, "attempts">,
 ): PatternProgress {
-  const attempts = (progress.attemptLog ?? Object.values(progress.attempts)).filter(
-    (attempt) => attempt.correctPatternId === patternId,
-  );
+  const attempts = (
+    progress.attemptLog ?? Object.values(progress.attempts)
+  ).filter((attempt) => attempt.correctPatternId === patternId);
   const recognitionCorrect = attempts.filter(
     (attempt) => attempt.wasPatternCorrect,
   ).length;
@@ -114,13 +244,26 @@ export function getPatternProgress(
     .sort()
     .at(-1);
 
+  const explanationScore = calculateExplanationScore(
+    masteryInput?.explanationScores,
+  );
+  const retentionScore = calculateRetentionScore(masteryInput?.retentionRatings);
+
   return {
     patternId,
     recognitionCorrect,
     recognitionAttempts: attempts.length,
     solvedCount,
     attemptedCount: attempts.length,
-    masteryScore: calculateMasteryScore(attempts),
+    masteryScore: calculateMasteryScore({
+      attempts,
+      explanationScores: masteryInput?.explanationScores,
+      retentionRatings: masteryInput?.retentionRatings,
+    }),
+    explanationScore,
+    retentionScore,
+    confidenceScore:
+      attempts.length === 0 ? null : calculateConfidenceScore(attempts),
     lastPracticedAt,
   };
 }

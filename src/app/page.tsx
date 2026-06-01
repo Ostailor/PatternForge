@@ -16,13 +16,14 @@ import {
   getProblemCountForPattern,
 } from "@/lib/mastery";
 import { getAttempts } from "@/lib/progress";
+import type { ReviewStats } from "@/lib/review/queue";
 import { generateDailySession } from "@/lib/session";
 import type { Attempt, PatternProgress, Problem } from "@/lib/types";
 import { useAuthProgress } from "@/lib/use-auth-progress";
 
 const DEMO_STATS = [
   { label: "Total XP", value: "0", detail: "Earned by practicing" },
-  { label: "Current streak", value: "0", detail: "Consecutive practice days" },
+  { label: "Current streak", value: "0", detail: "Attempt or review days" },
   { label: "Problems attempted", value: "0", detail: "Unique problem starts" },
   { label: "Problems solved", value: "0", detail: "Unique solved problems" },
   { label: "Recognition accuracy", value: "0%", detail: "Pattern guesses" },
@@ -59,7 +60,14 @@ function formatDate(dateValue: string): string {
 
 export default function Home() {
   const { user } = useUser();
-  const { progress, dashboardStats, isLoading, isSignedIn } = useAuthProgress();
+  const {
+    progress,
+    dashboardStats,
+    patternProgressById,
+    reviewStats,
+    isLoading,
+    isSignedIn,
+  } = useAuthProgress();
   const attempts = useMemo(() => getAttempts(progress), [progress]);
   const stats = useMemo(
     () => dashboardStats ?? getGamificationStats(attempts),
@@ -70,10 +78,12 @@ export default function Home() {
     () =>
       patterns.map((pattern) => ({
         pattern,
-        progress: getPatternProgress(pattern.id, progress),
+        progress:
+          patternProgressById?.[pattern.id] ??
+          getPatternProgress(pattern.id, progress),
         problemCount: getProblemCountForPattern(pattern.id),
       })),
-    [progress],
+    [patternProgressById, progress],
   );
   const patternsInProgress = patternRows
     .filter((row) => row.progress.attemptedCount > 0)
@@ -136,12 +146,14 @@ export default function Home() {
         />
       </section>
 
+      <ReviewDashboardSection reviewStats={reviewStats} />
+
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Total XP" value={stats.xp} detail="Account lifetime" />
         <StatCard
           label="Current streak"
           value={stats.currentStreak}
-          detail="Practice date run"
+          detail="Attempt or review days"
         />
         <StatCard
           label="Problems attempted"
@@ -356,6 +368,128 @@ function RecommendedPatternCard({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ReviewDashboardSection({
+  reviewStats,
+}: {
+  reviewStats: (ReviewStats & { memoryStreak: number }) | null;
+}) {
+  const hasRetentionData = (reviewStats?.recentReviewCount ?? 0) >= 3;
+  const hasAnyReviewData = (reviewStats?.recentReviewCount ?? 0) > 0;
+  const retentionValue =
+    hasRetentionData && reviewStats?.retentionScore !== null
+      ? `${reviewStats?.retentionScore}%`
+      : "Not enough reviews yet";
+  const weakestReviewTitle =
+    reviewStats?.weakestReviewPattern?.patternName ??
+    (hasAnyReviewData ? "No weak pattern yet" : "No review history yet");
+
+  return (
+    <section className="mt-6 grid gap-4 lg:grid-cols-[1.15fr_0.85fr] xl:grid-cols-4">
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm xl:col-span-2">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+              Today&apos;s Review
+            </p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+              Spaced repetition queue
+            </h2>
+          </div>
+          <Link
+            href="/review"
+            className="rounded-lg bg-slate-950 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-teal-700"
+          >
+            Start Daily Review
+          </Link>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-4">
+          <MiniStat
+            label="Flashcards due"
+            value={reviewStats?.dueFlashcardsCount ?? 0}
+          />
+          <MiniStat
+            label="Mistakes due"
+            value={reviewStats?.dueMistakesCount ?? 0}
+          />
+          <MiniStat label="Total due" value={reviewStats?.totalDueCount ?? 0} />
+          <MiniStat
+            label="Reviewed today"
+            value={reviewStats?.reviewedTodayCount ?? 0}
+          />
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+          Retention Score
+        </p>
+        <p className="mt-3 text-2xl font-black leading-tight text-slate-950 sm:text-3xl">
+          {retentionValue}
+        </p>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+          {hasRetentionData
+            ? `${reviewStats?.recentReviewCount ?? 0} recent review ratings`
+            : "Complete a few reviews to estimate retention."}
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-950 p-5 text-white shadow-sm">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-300">
+          Memory Streak
+        </p>
+        <p className="mt-3 text-4xl font-black">
+          {reviewStats?.memoryStreak ?? 0}
+        </p>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+          Consecutive days with a review or attempt.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2 xl:col-span-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+              Weakest Review Pattern
+            </p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+              {weakestReviewTitle}
+            </h2>
+          </div>
+          {reviewStats?.weakestReviewPattern ? (
+            <span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-amber-700">
+              {reviewStats.weakestReviewPattern.difficultCount} Again/Hard
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">
+          {reviewStats?.weakestReviewPattern
+            ? `${reviewStats.weakestReviewPattern.reviewedCount} recent review ratings, ${reviewStats.weakestReviewPattern.retentionScore}% retention.`
+            : hasAnyReviewData
+              ? "Recent ratings are holding up. Again and Hard reviews will surface here when a pattern needs attention."
+              : "Complete Daily Review sessions to reveal patterns that need another pass."}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-black text-slate-950">{value}</p>
     </div>
   );
 }

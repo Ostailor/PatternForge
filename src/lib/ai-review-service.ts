@@ -130,6 +130,7 @@ export async function createAIReviewForUserProfile(
 
   const aiInput = buildAIReviewInput(attempt, input);
   const review = await reviewer(aiInput);
+  const reviewDueAt = new Date();
 
   const savedReview = await prisma.$transaction(async (tx) => {
     const aiReview = await tx.aIReview.create({
@@ -160,6 +161,7 @@ export async function createAIReviewForUserProfile(
           mistakeType: mistake.mistakeType,
           description: mistake.description,
           correction: mistake.correction,
+          reviewDueAt,
         })),
       });
     }
@@ -172,6 +174,7 @@ export async function createAIReviewForUserProfile(
           patternId: attempt.correctPatternId,
           front: flashcard.front,
           back: flashcard.back,
+          reviewDueAt,
         })),
       });
     }
