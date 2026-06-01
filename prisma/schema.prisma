@@ -20,12 +20,15 @@ enum SolvedStatus {
 }
 
 model UserProfile {
-  id          String    @id @default(cuid())
-  authUserId  String    @unique
+  id          String      @id @default(cuid())
+  authUserId  String      @unique
   displayName String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
   attempts    Attempt[]
+  aiReviews   AIReview[]
+  mistakes    Mistake[]
+  flashcards  Flashcard[]
 }
 
 model Pattern {
@@ -42,6 +45,9 @@ model Pattern {
   problemPatterns  ProblemPattern[]
   selectedAttempts Attempt[]        @relation("SelectedPattern")
   correctAttempts  Attempt[]        @relation("CorrectPattern")
+  aiReviews        AIReview[]
+  mistakes         Mistake[]
+  flashcards       Flashcard[]
 
   @@index([levelOrder])
 }
@@ -58,6 +64,8 @@ model Problem {
   updatedAt        DateTime         @updatedAt
   problemPatterns  ProblemPattern[]
   attempts         Attempt[]
+  aiReviews        AIReview[]
+  mistakes         Mistake[]
 }
 
 model ProblemPattern {
@@ -90,6 +98,9 @@ model Attempt {
   problem           Problem      @relation(fields: [problemId], references: [id], onDelete: Restrict)
   selectedPattern   Pattern      @relation("SelectedPattern", fields: [selectedPatternId], references: [id], onDelete: Restrict)
   correctPattern    Pattern      @relation("CorrectPattern", fields: [correctPatternId], references: [id], onDelete: Restrict)
+  aiReviews         AIReview[]
+  mistakes          Mistake[]
+  flashcards        Flashcard[]
 
   @@index([userProfileId])
   @@index([problemId])
@@ -97,4 +108,72 @@ model Attempt {
   @@index([correctPatternId])
   @@index([userProfileId, problemId])
   @@index([userProfileId, createdAt])
+}
+
+model AIReview {
+  id                  String      @id @default(cuid())
+  userProfileId       String
+  attemptId           String
+  problemId           String
+  patternId           String
+  patternScore        Int
+  implementationScore Int
+  complexityScore     Int
+  explanationScore    Int
+  feedbackSummary     String      @db.Text
+  strengths           String[]    @default([])
+  weaknesses          String[]    @default([])
+  complexityFeedback  String      @db.Text
+  suggestedNextStep   String      @db.Text
+  createdAt           DateTime    @default(now())
+  userProfile         UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  attempt             Attempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  problem             Problem     @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  pattern             Pattern     @relation(fields: [patternId], references: [id], onDelete: Restrict)
+
+  @@index([userProfileId])
+  @@index([attemptId])
+  @@index([problemId])
+  @@index([patternId])
+  @@index([createdAt])
+}
+
+model Mistake {
+  id            String      @id @default(cuid())
+  userProfileId String
+  attemptId     String
+  problemId     String
+  patternId     String
+  mistakeType   String
+  description   String      @db.Text
+  correction    String      @db.Text
+  createdAt     DateTime    @default(now())
+  userProfile   UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  attempt       Attempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  problem       Problem     @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  pattern       Pattern     @relation(fields: [patternId], references: [id], onDelete: Restrict)
+
+  @@index([userProfileId])
+  @@index([attemptId])
+  @@index([problemId])
+  @@index([patternId])
+  @@index([createdAt])
+}
+
+model Flashcard {
+  id              String      @id @default(cuid())
+  userProfileId   String
+  sourceAttemptId String?
+  patternId       String
+  front           String      @db.Text
+  back            String      @db.Text
+  createdAt       DateTime    @default(now())
+  userProfile     UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  sourceAttempt   Attempt?    @relation(fields: [sourceAttemptId], references: [id], onDelete: SetNull)
+  pattern         Pattern     @relation(fields: [patternId], references: [id], onDelete: Restrict)
+
+  @@index([userProfileId])
+  @@index([sourceAttemptId])
+  @@index([patternId])
+  @@index([createdAt])
 }

@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  AIReviewAttemptAccessError,
+  AIReviewDailyLimitError,
+  createAIReviewForUserProfile,
+} from "@/lib/ai-review-service";
+import { DAILY_AI_REVIEW_LIMIT } from "@/lib/ai-review-limits";
+import type { AIReviewOutput } from "@/lib/ai/types";
+import { getPrisma } from "@/lib/prisma";
+import { createAttemptForUserProfile } from "@/lib/progress-db";
+
+const requiredDatabaseUrl = process.env.DATABASE_URL;
+
+if (!requiredDatabaseUrl) {
+  throw new Error("DATABASE_URL is required for AI review integration tests.");
+}
+
+const fakeReview: AIReviewOutput = {
+  patternScore: 8,
+  implementationScore: 7,
+  complexityScore: 6,
+  explanationScore: 9,
+  feedbackSummary: "You recognized the pattern and explained the tradeoff.",
+  strengths: ["Clear pattern recognition"],
+  weaknesses: ["Edge cases need a tighter explanation"],
+  complexityFeedback: "State both time and space complexity explicitly.",
+  suggestedMistakes: [
+    {
+      mistakeType: "complexity",
+      description: "The complexity analysis was incomplete.",
+      correction: "Explain the dominant loop and auxiliary storage.",
+    },
+  ],
+  suggestedFlashcards: [
+    {
+      front: "When does hash map lookup replace nested scanning?",
+      back: "When complements or previously seen values answer the query.",
+    },
+  ],
+  suggestedNextStep: "Practice one related problem and explain complexity aloud.",
+};
+
+async function resetUserData() {
+  const prisma = getPrisma();
+
+  await prisma.flashcard.deleteMany();
+  await prisma.mistake.deleteMany();
+  await prisma.aIReview.deleteMany();
+  await prisma.attempt.deleteMany();
+  await prisma.userProfile.deleteMany();
+}
+
+async function createUser(authUserId: string) {
+  return getPrisma().userProfile.create({
+    data: {
+      authUserId,
+      displayName: authUserId,
+    },
+  });
+}
+
+test("AI review saves review, mistake, and flashcard for the owning user only", async () => {
+  await resetUserData();
+
+  const owner = await createUser("owner-test-user");
+  const otherUser = await createUser("other-test-user");
+  const attempt = await createAttemptForUserProfile(owner.id, {
+    problemId: "two-sum",
+    selectedPatternId: "arrays-hashing",
+    solvedStatus: "Solved",
+    timeSpentMinutes: 12,
+    confidence: 4,
+    reflection: "I used a hash map to avoid a nested scan.",
+  });
+
+  const review = await createAIReviewForUserProfile(
+    {
+      attemptId: attempt.id,
+      userCode: "function twoSum() { return []; }",
+      userExplanation: "I used complements in a map.",
+    },
+    owner.id,
+    async () => fakeReview,
+  );
+
+  assert.equal(review.attemptId, attempt.id);
+  assert.equal(review.problemTitle, "Two Sum");
+  assert.equal(await getPrisma().aIReview.count({ where: { userProfileId: owner.id } }), 1);
+  assert.equal(await getPrisma().mistake.count({ where: { userProfileId: owner.id } }), 1);
+  assert.equal(await getPrisma().flashcard.count({ where: { userProfileId: owner.id } }), 1);
+
+  await assert.rejects(
+    () =>
+      createAIReviewForUserProfile(
+        {
+          attemptId: attempt.id,
+          userCode: "function twoSum() { return []; }",
+          userExplanation: "I used complements in a map.",
+        },
+        otherUser.id,
+        async () => fakeReview,
+      ),
+    AIReviewAttemptAccessError,
+  );
+});
+
+test("AI review enforces the per-user daily review limit", async () => {
+  await resetUserData();
+
+  const owner = await createUser("daily-limit-user");
+  const attempt = await createAttemptForUserProfile(owner.id, {
+    problemId: "two-sum",
+    selectedPatternId: "arrays-hashing",
+    solvedStatus: "Solved",
+    timeSpentMinutes: 10,
+    confidence: 4,
+    reflection: "I used a hash map.",
+  });
+
+  for (let index = 0; index < DAILY_AI_REVIEW_LIMIT; index += 1) {
+    await createAIReviewForUserProfile(
+      {
+        attemptId: attempt.id,
+        userCode: `function twoSum${index}() { return []; }`,
+        userExplanation: "Hash lookup.",
+      },
+      owner.id,
+      async () => fakeReview,
+    );
+  }
+
+  await assert.rejects(
+    () =>
+      createAIReviewForUserProfile(
+        {
+          attemptId: attempt.id,
+          userCode: "function extra() { return []; }",
+          userExplanation: "One more review.",
+        },
+        owner.id,
+        async () => fakeReview,
+      ),
+    AIReviewDailyLimitError,
+  );
+});

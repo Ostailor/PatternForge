@@ -19,12 +19,22 @@ export default function SessionSummary({
   if (attempt && problem) {
     return (
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
-          Session Summary
-        </p>
-        <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
-          {problem.title}
-        </h2>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+              Session Summary
+            </p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+              Attempt forged
+            </h2>
+            <p className="mt-2 text-sm font-bold leading-6 text-slate-600">
+              {problem.title}
+            </p>
+          </div>
+          <span className="rounded-md border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+            Saved
+          </span>
+        </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
@@ -51,9 +61,16 @@ export default function SessionSummary({
             </p>
           </div>
         </div>
-        <p className="mt-5 rounded-lg bg-teal-50 p-4 text-sm font-bold text-teal-700">
-          Saved to your account. Correct pattern: {correctPattern?.name ?? "Unknown"}.
-        </p>
+        <div className="mt-5 rounded-lg border border-teal-200 bg-teal-50 p-4">
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+            Next Training Move
+          </p>
+          <p className="mt-2 text-sm font-bold leading-6 text-teal-800">
+            Review the correct pattern, then use Coach Review if you want
+            feedback on your implementation. Correct pattern:{" "}
+            {correctPattern?.name ?? "Unknown"}.
+          </p>
+        </div>
       </section>
     );
   }

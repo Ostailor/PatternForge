@@ -60,6 +60,7 @@ function toPrismaSolvedStatus(solvedStatus: SolvedStatus): PrismaSolvedStatus {
 
 export function toAppAttempt(attempt: DbAttempt): Attempt {
   return {
+    id: attempt.id,
     problemId: attempt.problemId,
     selectedPatternId: attempt.selectedPatternId,
     correctPatternId: attempt.correctPatternId,
@@ -174,7 +175,7 @@ export async function getCurrentUserProgressSnapshot(
   };
 }
 
-async function createAttemptForUserProfile(
+export async function createAttemptForUserProfile(
   userProfileId: string,
   input: CreateAttemptInput,
 ): Promise<Attempt> {

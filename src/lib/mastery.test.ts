@@ -7,6 +7,7 @@ import { calculateMasteryLevel, summarizeSession } from "./mastery";
 import type { Attempt } from "./types";
 
 const solvedAttempt: Attempt = {
+  id: "attempt-test",
   problemId: "two-sum",
   selectedPatternId: "arrays-hashing",
   correctPatternId: "arrays-hashing",

@@ -14,6 +14,7 @@ type ProgressResponse = {
 
 export const ACCOUNT_PROGRESS_CHANGED_EVENT =
   "patternforge.account.progress.changed";
+const AUTH_LOAD_TIMEOUT_MS = 5000;
 
 export function notifyAccountProgressChanged() {
   if (typeof window === "undefined") {
@@ -25,6 +26,7 @@ export function notifyAccountProgressChanged() {
 
 export function useAuthProgress() {
   const { isLoaded, isSignedIn } = useAuth();
+  const [authLoadTimedOut, setAuthLoadTimedOut] = useState(false);
   const [progress, setProgress] = useState<UserProgress>(createEmptyProgress);
   const [dashboardStats, setDashboardStats] = useState<GamificationStats | null>(
     null,
@@ -32,11 +34,11 @@ export function useAuthProgress() {
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshProgress = useCallback(async () => {
-    if (!isLoaded) {
+    if (!isLoaded && !authLoadTimedOut) {
       return;
     }
 
-    if (!isSignedIn) {
+    if (!isLoaded || !isSignedIn) {
       setProgress(createEmptyProgress());
       setDashboardStats(null);
       setIsLoading(false);
@@ -66,7 +68,21 @@ export function useAuthProgress() {
       setDashboardStats(null);
       setIsLoading(false);
     }
-  }, [isLoaded, isSignedIn]);
+  }, [authLoadTimedOut, isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    if (isLoaded) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setAuthLoadTimedOut(true);
+    }, AUTH_LOAD_TIMEOUT_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isLoaded]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -87,7 +103,7 @@ export function useAuthProgress() {
   return {
     progress,
     dashboardStats,
-    isLoading: !isLoaded || isLoading,
+    isLoading: !authLoadTimedOut && (!isLoaded || isLoading),
     isSignedIn: Boolean(isSignedIn),
     refreshProgress,
   };

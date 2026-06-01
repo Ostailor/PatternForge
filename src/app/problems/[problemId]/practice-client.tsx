@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import AIReviewPanel from "@/components/AIReviewPanel";
+import HintPanel from "@/components/HintPanel";
 import RecognitionQuiz from "@/components/RecognitionQuiz";
 import ReflectionForm from "@/components/ReflectionForm";
 import SessionSummary from "@/components/SessionSummary";
@@ -27,7 +29,6 @@ export default function ProblemPracticeClient({
 }: ProblemPracticeClientProps) {
   const [step, setStep] = useState<PracticeStep>("preview");
   const [selectedPatternId, setSelectedPatternId] = useState("");
-  const [wasPatternCorrect, setWasPatternCorrect] = useState(false);
   const [savedAttempt, setSavedAttempt] = useState<Attempt | undefined>();
   const correctPattern = getPatternById(problem.primaryPatternId);
 
@@ -124,19 +125,21 @@ export default function ProblemPracticeClient({
             <RecognitionQuiz
               problem={problem}
               patterns={patterns}
-              onContinue={(nextSelectedPatternId, nextWasCorrect) => {
+              onContinue={(nextSelectedPatternId) => {
                 setSelectedPatternId(nextSelectedPatternId);
-                setWasPatternCorrect(nextWasCorrect);
                 setStep("reflection");
               }}
             />
+          ) : null}
+
+          {step === "preview" || step === "quiz" ? (
+            <HintPanel problem={problem} />
           ) : null}
 
           {step === "reflection" ? (
             <ReflectionForm
               problem={problem}
               selectedPatternId={selectedPatternId}
-              wasPatternCorrect={wasPatternCorrect}
               onSaved={(attempt) => {
                 setSavedAttempt(attempt);
                 setStep("summary");
@@ -145,11 +148,14 @@ export default function ProblemPracticeClient({
           ) : null}
 
           {step === "summary" && savedAttempt ? (
-            <SessionSummary
-              attempt={savedAttempt}
-              problem={problem}
-              correctPattern={correctPattern}
-            />
+            <>
+              <SessionSummary
+                attempt={savedAttempt}
+                problem={problem}
+                correctPattern={correctPattern}
+              />
+              <AIReviewPanel attempt={savedAttempt} />
+            </>
           ) : null}
         </div>
       </div>

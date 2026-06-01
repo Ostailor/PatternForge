@@ -36,6 +36,7 @@ export type Problem = {
 };
 
 export type Attempt = {
+  id: string;
   problemId: string;
   selectedPatternId: string;
   correctPatternId: string;

@@ -3,21 +3,19 @@
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { useState } from "react";
 
-import { saveAttemptAction } from "@/app/practice-actions";
+import { saveAttemptAction, type SaveAttemptInput } from "@/app/practice-actions";
 import type { Attempt, Confidence, Problem, SolvedStatus } from "@/lib/types";
 import { notifyAccountProgressChanged } from "@/lib/use-auth-progress";
 
 type ReflectionFormProps = {
   problem: Problem;
   selectedPatternId: string;
-  wasPatternCorrect: boolean;
   onSaved?: (attempt: Attempt) => void;
 };
 
 export default function ReflectionForm({
   problem,
   selectedPatternId,
-  wasPatternCorrect,
   onSaved,
 }: ReflectionFormProps) {
   const { isLoaded, isSignedIn } = useAuth();
@@ -45,16 +43,13 @@ export default function ReflectionForm({
       `Mistake: ${mistake.trim() || "Not recorded"}`,
       `Next time: ${nextMemory.trim() || "Not recorded"}`,
     ].join("\n");
-    const attempt: Attempt = {
+    const attempt: SaveAttemptInput = {
       problemId: problem.id,
       selectedPatternId,
-      correctPatternId: problem.primaryPatternId,
-      wasPatternCorrect,
       solvedStatus,
       timeSpentMinutes,
       confidence,
       reflection,
-      createdAt: new Date().toISOString(),
     };
 
     const result = await saveAttemptAction(attempt);
