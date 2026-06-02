@@ -2,7 +2,7 @@
 
 import { SignUpButton, useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import MasteryBadge from "@/components/MasteryBadge";
 import ProgressBar from "@/components/ProgressBar";
@@ -29,6 +29,7 @@ import type {
   DashboardGamificationData,
 } from "@/lib/progress-db";
 import type { DailyQuest } from "@/lib/quests/types";
+import type { DashboardRecommendation } from "@/lib/recommendations/dashboard";
 import type { ReviewStats } from "@/lib/review/queue";
 import { generateDailySession } from "@/lib/session";
 import type { Attempt, PatternProgress, Problem } from "@/lib/types";
@@ -120,6 +121,11 @@ function getEventTone(eventType: string): string {
       return "border-teal-200 bg-teal-50 text-teal-700";
     case "BattleCompleted":
       return "border-indigo-200 bg-indigo-50 text-indigo-700";
+    case "InterviewStarted":
+    case "InterviewCompleted":
+    case "InterviewStrongResult":
+    case "InterviewImprovement":
+      return "border-sky-200 bg-sky-50 text-sky-700";
     case "QuestCompleted":
       return "border-amber-200 bg-amber-50 text-amber-700";
     default:
@@ -136,9 +142,13 @@ export default function Home() {
     reviewStats,
     dailyQuests,
     dashboardGamification,
+    nextBestAction,
     isLoading,
     isSignedIn,
   } = useAuthProgress();
+  const [hiddenRecommendationId, setHiddenRecommendationId] = useState<
+    string | null
+  >(null);
   const attempts = useMemo(() => getAttempts(progress), [progress]);
   const stats = useMemo(
     () => dashboardStats ?? getGamificationStats(attempts),
@@ -175,6 +185,8 @@ export default function Home() {
   const overallMastery = getOverallMasteryScore(progress);
   const displayName =
     user?.firstName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress;
+  const visibleNextBestAction =
+    nextBestAction?.id === hiddenRecommendationId ? null : nextBestAction;
 
   if (isLoading) {
     return <LoadingDashboard />;
@@ -221,6 +233,12 @@ export default function Home() {
           goal={dailySession.goal}
         />
       </section>
+
+      <NextBestActionCard
+        key={visibleNextBestAction?.id ?? "no-next-best-action"}
+        recommendation={visibleNextBestAction}
+        onHide={() => setHiddenRecommendationId(nextBestAction?.id ?? null)}
+      />
 
       <ReviewDashboardSection reviewStats={reviewStats} />
 
@@ -474,6 +492,209 @@ function RecommendedPatternCard({
       </div>
     </div>
   );
+}
+
+function NextBestActionCard({
+  recommendation,
+  onHide,
+}: {
+  recommendation: DashboardRecommendation | null;
+  onHide: () => void;
+}) {
+  const [interaction, setInteraction] = useState<
+    "accepted" | "dismissed" | null
+  >(null);
+  const [feedbackSent, setFeedbackSent] = useState(false);
+
+  if (!recommendation) {
+    return null;
+  }
+
+  const recommendationId = recommendation.id;
+
+  async function updateRecommendation(
+    action: "accept" | "dismiss" | "feedback",
+    feedbackType?: string,
+  ) {
+    await fetch(`/api/recommendations/${recommendationId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, feedbackType }),
+    });
+  }
+
+  async function handleDismiss() {
+    setInteraction("dismissed");
+
+    try {
+      await updateRecommendation("dismiss");
+    } catch {
+      // Keep the local dismissal state; the next refresh will reconcile server state.
+    }
+  }
+
+  async function handleFeedback(feedbackType: string) {
+    setFeedbackSent(true);
+
+    try {
+      await updateRecommendation("feedback", feedbackType);
+    } catch {
+      setFeedbackSent(false);
+    }
+  }
+
+  function handleCtaClick() {
+    setInteraction("accepted");
+    void updateRecommendation("accept");
+  }
+
+  return (
+    <section className="mt-6 rounded-lg border border-teal-200 bg-white p-5 shadow-sm">
+      <div className="grid gap-5 lg:grid-cols-[1fr_0.38fr]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+              Next Best Action
+            </span>
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-black uppercase tracking-[0.14em] text-slate-600">
+              {recommendation.recommendationTypeLabel}
+            </span>
+            <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-black uppercase tracking-[0.14em] text-slate-600">
+              {recommendation.estimatedMinutes} min
+            </span>
+          </div>
+
+          <h2 className="mt-4 text-3xl font-black tracking-tight text-slate-950">
+            {recommendation.title}
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
+            {recommendation.reason}
+          </p>
+
+          {recommendation.targetPatternName || recommendation.secondaryPatternName ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {recommendation.targetPatternName ? (
+                <span className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-indigo-700">
+                  Target: {recommendation.targetPatternName}
+                </span>
+              ) : null}
+              {recommendation.secondaryPatternName ? (
+                <span className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-rose-700">
+                  Compare: {recommendation.secondaryPatternName}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {recommendation.evidence.length > 0 ? (
+            <div className="mt-5 grid gap-2 sm:grid-cols-2">
+              {recommendation.evidence.map((item) => (
+                <p
+                  key={item}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold leading-5 text-slate-600"
+                >
+                  {item}
+                </p>
+              ))}
+            </div>
+          ) : null}
+
+          {interaction ? (
+            <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-black text-slate-950">
+                  {interaction === "dismissed"
+                    ? "Recommendation dismissed."
+                    : "Recommendation opened."}
+                </p>
+                {interaction === "dismissed" ? (
+                  <button
+                    type="button"
+                    onClick={onHide}
+                    className="text-sm font-black text-slate-500 hover:text-slate-950"
+                  >
+                    Hide card
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+              Action path
+            </p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+              Start here when you want the highest-value next rep.
+            </p>
+          </div>
+          <div className="grid gap-2">
+            <Link
+              href={recommendation.primaryCta.href}
+              onClick={handleCtaClick}
+              className="inline-flex justify-center rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700"
+            >
+              {recommendation.primaryCta.label}
+            </Link>
+            {recommendation.secondaryCta ? (
+              <Link
+                href={recommendation.secondaryCta.href}
+                onClick={handleCtaClick}
+                className="inline-flex justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-100"
+              >
+                {recommendation.secondaryCta.label}
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void handleDismiss()}
+              className="inline-flex justify-center rounded-lg border border-slate-200 bg-transparent px-4 py-3 text-sm font-black text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+            >
+              Dismiss
+            </button>
+          </div>
+          <div className="border-t border-slate-200 pt-3">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+              Feedback
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {recommendation.feedbackOptions.map((feedbackType) => (
+                <button
+                  key={feedbackType}
+                  type="button"
+                  disabled={feedbackSent}
+                  onClick={() => void handleFeedback(feedbackType)}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-600 transition hover:border-teal-200 hover:text-teal-700 disabled:opacity-50"
+                >
+                  {formatFeedbackLabel(feedbackType)}
+                </button>
+              ))}
+            </div>
+            {feedbackSent ? (
+              <p className="mt-2 text-xs font-bold text-teal-700">
+                Feedback saved.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function formatFeedbackLabel(feedbackType: string): string {
+  switch (feedbackType) {
+    case "TooEasy":
+      return "Too easy";
+    case "TooHard":
+      return "Too hard";
+    case "NotRelevant":
+      return "Not relevant";
+    default:
+      return feedbackType;
+  }
 }
 
 function BossBattleDashboardCard({

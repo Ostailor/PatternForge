@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -12,6 +14,11 @@ import { getPrisma } from "@/lib/prisma";
 import { createAttemptForUserProfile } from "@/lib/progress-db";
 
 const requiredDatabaseUrl = process.env.DATABASE_URL;
+const testAuthUserIds = [
+  "owner-test-user",
+  "other-test-user",
+  "daily-limit-user",
+];
 
 if (!requiredDatabaseUrl) {
   throw new Error("DATABASE_URL is required for AI review integration tests.");
@@ -43,13 +50,11 @@ const fakeReview: AIReviewOutput = {
 };
 
 async function resetUserData() {
-  const prisma = getPrisma();
-
-  await prisma.flashcard.deleteMany();
-  await prisma.mistake.deleteMany();
-  await prisma.aIReview.deleteMany();
-  await prisma.attempt.deleteMany();
-  await prisma.userProfile.deleteMany();
+  await getPrisma().userProfile.deleteMany({
+    where: {
+      authUserId: { in: testAuthUserIds },
+    },
+  });
 }
 
 async function createUser(authUserId: string) {

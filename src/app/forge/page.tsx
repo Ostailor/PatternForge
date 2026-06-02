@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { generateDailySession } from "@/lib/session";
 import { getAttempts } from "@/lib/progress";
-import type { DailyForgeProblem, DailyForgeSession } from "@/lib/session";
+import type { DailyForgeSession, DailyForgeStep } from "@/lib/session";
 import type { Problem } from "@/lib/types";
 import { useAuthProgress } from "@/lib/use-auth-progress";
 
@@ -16,14 +16,23 @@ const difficultyStyles: Record<Problem["difficulty"], string> = {
   Hard: "border-rose-200 bg-rose-50 text-rose-700",
 };
 
-const typeStyles: Record<DailyForgeProblem["type"], string> = {
-  "Warm-up": "border-sky-200 bg-sky-50 text-sky-700",
-  "Main Forge": "border-slate-300 bg-slate-950 text-white",
+const typeStyles: Record<DailyForgeStep["type"], string> = {
+  "Due Review Warmup": "border-amber-200 bg-amber-50 text-amber-700",
+  "Recognition Drill": "border-sky-200 bg-sky-50 text-sky-700",
+  "Focused Problem": "border-slate-300 bg-slate-950 text-white",
+  "Contrast Problem": "border-rose-200 bg-rose-50 text-rose-700",
   "Mixed Review": "border-violet-200 bg-violet-50 text-violet-700",
+  "Boss Prep": "border-emerald-200 bg-emerald-50 text-emerald-700",
 };
 
 export default function ForgePage() {
-  const { progress, isSignedIn, isLoading } = useAuthProgress();
+  const {
+    progress,
+    isSignedIn,
+    isLoading,
+    patternProgressById,
+    reviewStats,
+  } = useAuthProgress();
   const [session, setSession] = useState<DailyForgeSession>(() =>
     generateDailySession([]),
   );
@@ -36,11 +45,17 @@ export default function ForgePage() {
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSession(
-      generateDailySession(attempts, focusPatternId ?? undefined),
+      generateDailySession(attempts, focusPatternId ?? undefined, {
+        patternProgressById,
+        reviewStats,
+      }),
     );
-  }, [isSignedIn, progress]);
+  }, [isSignedIn, patternProgressById, progress, reviewStats]);
 
-  const firstProblem = session.problems[0]?.problem;
+  const firstStep = session.steps[0];
+  const firstHref = firstStep?.href ?? (
+    firstStep?.problem ? `/problems/${firstStep.problem.id}` : null
+  );
   const estimatedLabel = useMemo(
     () =>
       session.estimatedTotalMinutes >= 60
@@ -48,6 +63,9 @@ export default function ForgePage() {
         : `${session.estimatedTotalMinutes} min`,
     [session.estimatedTotalMinutes],
   );
+  const reviewOnlyStepCount = session.steps.length - session.problems.length;
+  const reviewOnlyStepLabel =
+    reviewOnlyStepCount === 1 ? "review-only step" : "review-only steps";
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -69,12 +87,12 @@ export default function ForgePage() {
                 : "Sign in before reflection to save these reps."}
             </p>
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              {firstProblem ? (
+              {firstHref ? (
                 <Link
-                  href={`/problems/${firstProblem.id}`}
+                  href={firstHref}
                   className="rounded-lg bg-teal-400 px-5 py-3 text-center text-sm font-black text-slate-950 transition hover:bg-teal-300"
                 >
-                  Start Warm-up
+                  Start Daily Forge
                 </Link>
               ) : null}
               <Link
@@ -95,10 +113,10 @@ export default function ForgePage() {
             </div>
             <div className="rounded-lg border border-white/10 bg-white/5 p-4">
               <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">
-                Problems
+                Steps
               </p>
               <p className="mt-3 text-3xl font-black">
-                {session.problems.length}
+                {session.steps.length}
               </p>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/5 p-4">
@@ -130,22 +148,57 @@ export default function ForgePage() {
         </section>
       ) : null}
 
+      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+              Session summary
+            </p>
+            <p className="mt-2 text-sm font-bold leading-6 text-slate-600">
+              {session.problems.length} problem reps and {reviewOnlyStepCount}{" "}
+              {reviewOnlyStepLabel}, ordered by today&apos;s practice signal.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {session.steps.map((step, index) => (
+              <span
+                key={`${step.type}-${index}`}
+                className={`rounded-md border px-2.5 py-1 text-xs font-black ${typeStyles[step.type]}`}
+              >
+                {index + 1}. {step.type}
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="mt-6 grid gap-5 lg:grid-cols-3">
-        {session.problems.map((item, index) => (
-          <ForgeProblemCard key={`${item.type}-${item.problem.id}`} item={item} index={index} />
+        {session.steps.map((item, index) => (
+          <ForgeStepCard
+            key={`${item.type}-${item.problem?.id ?? item.href ?? index}`}
+            item={item}
+            index={index}
+          />
         ))}
       </section>
     </main>
   );
 }
 
-function ForgeProblemCard({
+function ForgeStepCard({
   item,
   index,
 }: {
-  item: DailyForgeProblem;
+  item: DailyForgeStep;
   index: number;
 }) {
+  if (!item.problem) {
+    return <ForgeReviewCard item={item} index={index} />;
+  }
+
+  const actionLabel =
+    item.type === "Recognition Drill" ? "Start Recognition Quiz" : "Practice Problem";
+
   return (
     <article className="flex min-h-[360px] flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -171,7 +224,10 @@ function ForgeProblemCard({
           {item.problem.title}
         </h2>
         <p className="mt-2 text-sm font-semibold text-slate-500">
-          {item.problem.estimatedMinutes} min estimated
+          {item.description}
+        </p>
+        <p className="mt-2 text-sm font-semibold text-slate-500">
+          {item.estimatedMinutes} min estimated
         </p>
       </div>
 
@@ -199,7 +255,65 @@ function ForgeProblemCard({
           href={`/problems/${item.problem.id}`}
           className="inline-flex w-full justify-center rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700"
         >
-          Practice Problem
+          {actionLabel}
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function ForgeReviewCard({
+  item,
+  index,
+}: {
+  item: DailyForgeStep;
+  index: number;
+}) {
+  return (
+    <article className="flex min-h-[360px] flex-col rounded-lg border border-amber-200 bg-amber-50 p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <span
+            className={`inline-flex rounded-md border px-2.5 py-1 text-xs font-black ${typeStyles[item.type]}`}
+          >
+            {item.type}
+          </span>
+          <p className="mt-4 text-sm font-black uppercase tracking-[0.16em] text-amber-700/70">
+            Rep 0{index + 1}
+          </p>
+        </div>
+        <span className="rounded-md border border-amber-200 bg-white px-2.5 py-1 text-xs font-bold text-amber-700">
+          Review
+        </span>
+      </div>
+
+      <div className="mt-5">
+        <h2 className="text-xl font-black tracking-tight text-slate-950">
+          {item.title}
+        </h2>
+        <p className="mt-2 text-sm font-semibold leading-6 text-amber-900">
+          {item.description}
+        </p>
+      </div>
+
+      <div className="mt-5 rounded-lg border border-amber-200 bg-white p-4">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-700">
+          Warmup target
+        </p>
+        <p className="mt-2 text-3xl font-black text-slate-950">
+          {item.reviewCount ?? 1}
+        </p>
+        <p className="mt-1 text-xs font-bold text-slate-500">
+          due flashcards or mistakes
+        </p>
+      </div>
+
+      <div className="mt-auto pt-6">
+        <Link
+          href={item.href ?? "/review"}
+          className="inline-flex w-full justify-center rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700"
+        >
+          Start Review Warmup
         </Link>
       </div>
     </article>

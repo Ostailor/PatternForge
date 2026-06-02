@@ -8,9 +8,12 @@ import Link from "next/link";
 
 const navItems = [
   { href: "/", label: "Dashboard" },
+  { href: "/readiness", label: "Readiness" },
   { href: "/patterns", label: "Patterns" },
   { href: "/forge", label: "Daily Forge" },
+  { href: "/plans", label: "Plans" },
   { href: "/battles", label: "Battles" },
+  { href: "/interviews", label: "Interviews" },
   { href: "/review", label: "Review" },
   { href: "/flashcards", label: "Cards" },
   { href: "/achievements", label: "Badges" },

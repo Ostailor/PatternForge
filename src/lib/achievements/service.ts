@@ -76,15 +76,24 @@ export async function awardAchievementWithClient(
     return null;
   }
 
-  const achievement = await client.achievement.findUnique({
+  const achievement = await client.achievement.upsert({
     where: {
       key: achievementKey,
     },
+    update: {
+      name: definition.name,
+      description: definition.description,
+      icon: definition.icon,
+      xpReward: definition.xpReward,
+    },
+    create: {
+      key: definition.key,
+      name: definition.name,
+      description: definition.description,
+      icon: definition.icon,
+      xpReward: definition.xpReward,
+    },
   });
-
-  if (!achievement) {
-    return null;
-  }
 
   const existingUserAchievement = await client.userAchievement.findUnique({
     where: {
@@ -132,7 +141,14 @@ export async function awardAchievement(
 }
 
 async function getAchievementProgress(client: AchievementClient, userProfileId: string) {
-  const [attempts, mistakeCount, reviewCount, victoryCount, reviewGauntletCount] =
+  const [
+    attempts,
+    mistakeCount,
+    reviewCount,
+    victoryCount,
+    reviewGauntletCount,
+    interviews,
+  ] =
     await Promise.all([
       client.attempt.findMany({
         where: { userProfileId },
@@ -158,6 +174,21 @@ async function getAchievementProgress(client: AchievementClient, userProfileId: 
           battleType: "ReviewGauntlet",
         },
       }),
+      client.interviewSession.findMany({
+        where: {
+          userProfileId,
+          status: "Completed",
+        },
+        select: {
+          overallScore: true,
+          communicationScore: true,
+          testingScore: true,
+          complexityScore: true,
+          completedAt: true,
+          createdAt: true,
+        },
+        orderBy: [{ completedAt: "asc" }, { createdAt: "asc" }],
+      }),
     ]);
   const appAttempts = attempts.map(toAchievementAttempt);
   const progress = progressFromAttempts(appAttempts);
@@ -170,6 +201,19 @@ async function getAchievementProgress(client: AchievementClient, userProfileId: 
     attempts: appAttempts,
     reviewDates: reviewDates.map((reviewLog) => reviewLog.reviewedAt),
   });
+  const interviewScores = interviews
+    .map((interview) => interview.overallScore)
+    .filter((score): score is number => typeof score === "number");
+  const bestInterviewImprovement = interviewScores.reduce(
+    (bestImprovement, score, index) => {
+      if (index === 0) {
+        return bestImprovement;
+      }
+
+      return Math.max(bestImprovement, score - interviewScores[index - 1]);
+    },
+    0,
+  );
 
   return {
     attemptCount: attempts.length,
@@ -182,6 +226,18 @@ async function getAchievementProgress(client: AchievementClient, userProfileId: 
     memoryStreak,
     slidingWindowMastery: slidingWindowProgress.masteryScore,
     slidingWindowLevel: getMasteryLevel(slidingWindowProgress.masteryScore),
+    completedInterviewCount: interviews.length,
+    hasClearCommunicator: interviews.some(
+      (interview) => (interview.communicationScore ?? 0) >= 85,
+    ),
+    hasComplexityClean: interviews.some(
+      (interview) => (interview.complexityScore ?? 0) >= 90,
+    ),
+    hasEdgeCaseHunter: interviews.some(
+      (interview) => (interview.testingScore ?? 0) >= 85,
+    ),
+    hasInterviewReady: interviewScores.some((score) => score >= 85),
+    bestInterviewImprovement,
   };
 }
 
@@ -199,6 +255,12 @@ export async function checkAchievementsWithClient(
     progress.memoryStreak >= 3 ? "streak-spark" : "",
     progress.slidingWindowMastery >= 80 ? "sliding-window-sharp" : "",
     progress.reviewGauntletCount >= 1 ? "review-gauntlet-survivor" : "",
+    progress.completedInterviewCount >= 1 ? "first-mock" : "",
+    progress.hasClearCommunicator ? "clear-communicator" : "",
+    progress.hasComplexityClean ? "complexity-clean" : "",
+    progress.hasEdgeCaseHunter ? "edge-case-hunter" : "",
+    progress.hasInterviewReady ? "interview-ready" : "",
+    progress.bestInterviewImprovement >= 20 ? "comeback-candidate" : "",
   ].filter(Boolean);
 
   for (const achievementKey of earnedKeys) {

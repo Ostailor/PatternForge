@@ -26,6 +26,12 @@ import { getPrisma } from "@/lib/prisma";
 import { progressFromAttempts } from "@/lib/progress";
 import { generateDailyQuests } from "@/lib/quests/generateDailyQuests";
 import { updateQuestProgress } from "@/lib/quests/updateQuestProgress";
+import {
+  toDashboardRecommendation,
+  type DashboardRecommendation,
+  type SavedRecommendationForDashboard,
+} from "@/lib/recommendations/dashboard";
+import { updatePatternConfusionOnAttemptWithClient } from "@/lib/recommendations/patternConfusion";
 import { getReviewStats, type ReviewStats } from "@/lib/review/queue";
 import type { ReviewRating } from "@/lib/review/types";
 import type {
@@ -123,6 +129,7 @@ export type UserProgressSnapshot = {
   reviewStats: (ReviewStats & { memoryStreak: number }) | null;
   dailyQuests: Awaited<ReturnType<typeof generateDailyQuests>> | null;
   dashboardGamification: DashboardGamificationData | null;
+  nextBestAction: DashboardRecommendation | null;
 };
 
 export type ImportAttemptsResult = {
@@ -265,6 +272,7 @@ function formatEventTitle(
   lookups: {
     achievements: Map<string, string>;
     battles: Map<string, string>;
+    interviews: Map<string, string>;
     quests: Map<string, string>;
   },
 ): string {
@@ -288,6 +296,38 @@ function formatEventTitle(
       return `${
         (battleId ? lookups.battles.get(battleId) : null) ?? "Boss Battle"
       } completed`;
+    }
+    case "InterviewStarted": {
+      const interviewId = readJsonString(event.metadata, "interviewId");
+
+      return `${
+        (interviewId ? lookups.interviews.get(interviewId) : null) ??
+        "Interview"
+      } started`;
+    }
+    case "InterviewCompleted": {
+      const interviewId = readJsonString(event.metadata, "interviewId");
+
+      return `${
+        (interviewId ? lookups.interviews.get(interviewId) : null) ??
+        "Interview"
+      } completed`;
+    }
+    case "InterviewStrongResult": {
+      const interviewId = readJsonString(event.metadata, "interviewId");
+
+      return `Strong result: ${
+        (interviewId ? lookups.interviews.get(interviewId) : null) ??
+        "Interview"
+      }`;
+    }
+    case "InterviewImprovement": {
+      const interviewId = readJsonString(event.metadata, "interviewId");
+
+      return `Improved: ${
+        (interviewId ? lookups.interviews.get(interviewId) : null) ??
+        "Interview"
+      }`;
     }
     case "QuestCompleted": {
       const questId = readJsonString(event.metadata, "questId");
@@ -318,10 +358,13 @@ async function getRecentDashboardEvents(
   const battleIds = events
     .map((event) => readJsonString(event.metadata, "battleId"))
     .filter((id): id is string => id !== null);
+  const interviewIds = events
+    .map((event) => readJsonString(event.metadata, "interviewId"))
+    .filter((id): id is string => id !== null);
   const questIds = events
     .map((event) => readJsonString(event.metadata, "questId"))
     .filter((id): id is string => id !== null);
-  const [achievements, battles, quests] = await Promise.all([
+  const [achievements, battles, interviews, quests] = await Promise.all([
     achievementIds.length > 0
       ? getPrisma().achievement.findMany({
           where: { id: { in: achievementIds } },
@@ -331,6 +374,12 @@ async function getRecentDashboardEvents(
     battleIds.length > 0
       ? getPrisma().battle.findMany({
           where: { id: { in: battleIds } },
+          select: { id: true, title: true },
+        })
+      : [],
+    interviewIds.length > 0
+      ? getPrisma().interviewSession.findMany({
+          where: { id: { in: interviewIds }, userProfileId },
           select: { id: true, title: true },
         })
       : [],
@@ -346,6 +395,9 @@ async function getRecentDashboardEvents(
       achievements.map((achievement) => [achievement.id, achievement.name]),
     ),
     battles: new Map(battles.map((battle) => [battle.id, battle.title])),
+    interviews: new Map(
+      interviews.map((interview) => [interview.id, interview.title]),
+    ),
     quests: new Map(quests.map((quest) => [quest.id, quest.title])),
   };
 
@@ -811,6 +863,69 @@ export async function getCurrentUserDashboardStats() {
   };
 }
 
+function toPlainRecord(value: Prisma.JsonValue): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function getEvidenceFromMetadata(metadata: Record<string, unknown>): string[] {
+  const evidence = metadata.evidence;
+
+  return Array.isArray(evidence)
+    ? evidence.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+async function getDashboardNextBestAction(
+  userProfileId: string,
+): Promise<DashboardRecommendation | null> {
+  const { saveRecommendations } = await import("@/lib/recommendations/engine");
+
+  await saveRecommendations(userProfileId);
+
+  const recommendation = await getPrisma().recommendation.findFirst({
+    where: {
+      userProfileId,
+      status: "Active",
+    },
+    select: {
+      id: true,
+      title: true,
+      reason: true,
+      recommendationType: true,
+      priority: true,
+      targetPatternId: true,
+      secondaryPatternId: true,
+      problemId: true,
+      battleType: true,
+      metadata: true,
+    },
+    orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
+  });
+
+  if (!recommendation) {
+    return null;
+  }
+
+  const metadata = toPlainRecord(recommendation.metadata);
+  const savedRecommendation: SavedRecommendationForDashboard = {
+    id: recommendation.id,
+    title: recommendation.title,
+    reason: recommendation.reason,
+    recommendationType: recommendation.recommendationType,
+    priority: recommendation.priority,
+    targetPatternId: recommendation.targetPatternId ?? undefined,
+    secondaryPatternId: recommendation.secondaryPatternId ?? undefined,
+    problemId: recommendation.problemId ?? undefined,
+    battleType: recommendation.battleType ?? undefined,
+    metadata,
+    evidence: getEvidenceFromMetadata(metadata),
+  };
+
+  return toDashboardRecommendation(savedRecommendation);
+}
+
 export async function getCurrentUserProgressSnapshot(
   patternId?: string,
 ): Promise<UserProgressSnapshot> {
@@ -825,6 +940,7 @@ export async function getCurrentUserProgressSnapshot(
       reviewStats: null,
       dailyQuests: null,
       dashboardGamification: null,
+      nextBestAction: null,
     };
   }
 
@@ -847,7 +963,7 @@ export async function getCurrentUserProgressSnapshot(
       reviewStats.reviewedTodayCount > 0 &&
       reviewStats.totalDueCount === 0,
   });
-  const [totalXp, dashboardGamification] = userProfile
+  const [totalXp, dashboardGamification, nextBestAction] = userProfile
     ? await Promise.all([
         getTotalXP(userProfile.id),
         getDashboardGamificationData({
@@ -855,8 +971,9 @@ export async function getCurrentUserProgressSnapshot(
           attempts,
           patternProgressById,
         }),
+        getDashboardNextBestAction(userProfile.id),
       ])
-    : [dashboardStats.xp, null];
+    : [dashboardStats.xp, null, null];
 
   return {
     progress,
@@ -883,6 +1000,7 @@ export async function getCurrentUserProgressSnapshot(
       : null,
     dailyQuests,
     dashboardGamification,
+    nextBestAction,
   };
 }
 
@@ -947,6 +1065,13 @@ export async function createAttemptForUserProfileWithClient(
       wasPatternCorrect: attempt.wasPatternCorrect,
       solvedStatus: appAttempt.solvedStatus,
     },
+  );
+  await updatePatternConfusionOnAttemptWithClient(
+    client,
+    userProfileId,
+    attempt.selectedPatternId,
+    attempt.correctPatternId,
+    attempt.createdAt,
   );
   await updateQuestProgress(client, userProfileId, {
     eventType: "AttemptCompleted",

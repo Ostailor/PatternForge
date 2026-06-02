@@ -67,65 +67,206 @@ enum GameEventType {
   AttemptCompleted
   ReviewCompleted
   BattleCompleted
+  InterviewStarted
+  InterviewCompleted
+  InterviewStrongResult
+  InterviewImprovement
   QuestCompleted
   AchievementEarned
+  ContrastDrillCompleted
+}
+
+enum RecommendationType {
+  DueReview
+  FocusPattern
+  ContrastDrill
+  RetryProblem
+  BossBattle
+  ReviewGauntlet
+  AIReviewFollowUp
+  LearningPlanStep
+  MockInterview
+  FocusedInterview
+  WeaknessRepairInterview
+  DailyForge
+}
+
+enum RecommendationStatus {
+  Active
+  Accepted
+  Completed
+  Dismissed
+  Expired
+}
+
+enum InsightType {
+  WeakPattern
+  StrongPattern
+  ConfusingPattern
+  RetentionRisk
+  ReadyForBoss
+  Plateau
+  NeedsReview
+  NeedsImplementationPractice
+}
+
+enum InsightSeverity {
+  Low
+  Medium
+  High
+}
+
+enum LearningPlanStatus {
+  Active
+  Completed
+  Paused
+  Abandoned
+}
+
+enum LearningPlanStepStatus {
+  Pending
+  Active
+  Completed
+  Skipped
+}
+
+enum RecommendationFeedbackType {
+  Accepted
+  Dismissed
+  TooEasy
+  TooHard
+  NotRelevant
+  Helpful
+}
+
+enum InterviewType {
+  SingleProblem
+  FocusedPattern
+  MixedInterview
+  WeaknessRepair
+}
+
+enum InterviewStatus {
+  Active
+  Completed
+  Abandoned
+}
+
+enum InterviewRoundStatus {
+  Pending
+  Active
+  Completed
+  Skipped
+}
+
+enum InterviewResult {
+  StrongHire
+  Hire
+  LeanHire
+  LeanNoHire
+  NoHire
+}
+
+enum InterviewMessageRole {
+  User
+  Interviewer
+  System
+}
+
+enum InterviewPhase {
+  Setup
+  ClarifyingQuestions
+  PatternHypothesis
+  Approach
+  Implementation
+  Testing
+  Complexity
+  Feedback
+}
+
+enum RubricCategory {
+  Communication
+  PatternRecognition
+  ProblemSolving
+  Implementation
+  Testing
+  Complexity
+  TimeManagement
 }
 
 model UserProfile {
-  id               String            @id @default(cuid())
-  authUserId       String            @unique
-  displayName      String
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  attempts         Attempt[]
-  aiReviews        AIReview[]
-  mistakes         Mistake[]
-  flashcards       Flashcard[]
-  reviewLogs       ReviewLog[]
-  battles          Battle[]
-  quests           Quest[]
-  userAchievements UserAchievement[]
-  gameEvents       GameEvent[]
+  id                     String                   @id @default(cuid())
+  authUserId             String                   @unique
+  displayName            String
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  attempts               Attempt[]
+  aiReviews              AIReview[]
+  mistakes               Mistake[]
+  flashcards             Flashcard[]
+  reviewLogs             ReviewLog[]
+  battles                Battle[]
+  quests                 Quest[]
+  userAchievements       UserAchievement[]
+  gameEvents             GameEvent[]
+  recommendations        Recommendation[]
+  patternInsights        PatternInsight[]
+  patternConfusions      PatternConfusion[]
+  learningPlans          LearningPlan[]
+  recommendationFeedback RecommendationFeedback[]
+  interviewSessions      InterviewSession[]
 }
 
 model Pattern {
-  id               String           @id
-  name             String
-  category         String
-  description      String           @db.Text
-  recognitionClues String[]         @default([])
-  templateSummary  String           @db.Text
-  commonMistakes   String[]         @default([])
-  levelOrder       Int
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  problemPatterns  ProblemPattern[]
-  selectedAttempts Attempt[]        @relation("SelectedPattern")
-  correctAttempts  Attempt[]        @relation("CorrectPattern")
-  aiReviews        AIReview[]
-  mistakes         Mistake[]
-  flashcards       Flashcard[]
-  targetBattles    Battle[]
-  expectedRounds   BattleRound[]
+  id                       String             @id
+  name                     String
+  category                 String
+  description              String             @db.Text
+  recognitionClues         String[]           @default([])
+  templateSummary          String             @db.Text
+  commonMistakes           String[]           @default([])
+  levelOrder               Int
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  problemPatterns          ProblemPattern[]
+  selectedAttempts         Attempt[]          @relation("SelectedPattern")
+  correctAttempts          Attempt[]          @relation("CorrectPattern")
+  aiReviews                AIReview[]
+  mistakes                 Mistake[]
+  flashcards               Flashcard[]
+  targetBattles            Battle[]
+  expectedRounds           BattleRound[]
+  targetRecommendations    Recommendation[]   @relation("RecommendationTargetPattern")
+  secondaryRecommendations Recommendation[]   @relation("RecommendationSecondaryPattern")
+  patternInsights          PatternInsight[]
+  selectedConfusions       PatternConfusion[] @relation("SelectedConfusionPattern")
+  correctConfusions        PatternConfusion[] @relation("CorrectConfusionPattern")
+  learningPlanSteps        LearningPlanStep[]
+  targetInterviewSessions  InterviewSession[]
+  selectedInterviewRounds  InterviewRound[]   @relation("InterviewRoundSelectedPattern")
+  correctInterviewRounds   InterviewRound[]   @relation("InterviewRoundCorrectPattern")
 
   @@index([levelOrder])
 }
 
 model Problem {
-  id               String           @id
-  title            String
-  url              String           @unique
-  difficulty       Difficulty
-  estimatedMinutes Int
-  recognitionClues String[]         @default([])
-  commonMistakes   String[]         @default([])
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  problemPatterns  ProblemPattern[]
-  attempts         Attempt[]
-  aiReviews        AIReview[]
-  mistakes         Mistake[]
-  battleRounds     BattleRound[]
+  id                String             @id
+  title             String
+  url               String             @unique
+  difficulty        Difficulty
+  estimatedMinutes  Int
+  recognitionClues  String[]           @default([])
+  commonMistakes    String[]           @default([])
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  problemPatterns   ProblemPattern[]
+  attempts          Attempt[]
+  aiReviews         AIReview[]
+  mistakes          Mistake[]
+  battleRounds      BattleRound[]
+  recommendations   Recommendation[]
+  learningPlanSteps LearningPlanStep[]
+  interviewRounds   InterviewRound[]
 }
 
 model ProblemPattern {
@@ -143,7 +284,7 @@ model ProblemPattern {
 }
 
 model Attempt {
-  id                String        @id @default(cuid())
+  id                String           @id @default(cuid())
   userProfileId     String
   problemId         String
   selectedPatternId String
@@ -152,16 +293,17 @@ model Attempt {
   solvedStatus      SolvedStatus
   timeSpentMinutes  Int
   confidence        Int
-  reflection        String        @db.Text
-  createdAt         DateTime      @default(now())
-  userProfile       UserProfile   @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
-  problem           Problem       @relation(fields: [problemId], references: [id], onDelete: Restrict)
-  selectedPattern   Pattern       @relation("SelectedPattern", fields: [selectedPatternId], references: [id], onDelete: Restrict)
-  correctPattern    Pattern       @relation("CorrectPattern", fields: [correctPatternId], references: [id], onDelete: Restrict)
+  reflection        String           @db.Text
+  createdAt         DateTime         @default(now())
+  userProfile       UserProfile      @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  problem           Problem          @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  selectedPattern   Pattern          @relation("SelectedPattern", fields: [selectedPatternId], references: [id], onDelete: Restrict)
+  correctPattern    Pattern          @relation("CorrectPattern", fields: [correctPatternId], references: [id], onDelete: Restrict)
   aiReviews         AIReview[]
   mistakes          Mistake[]
   flashcards        Flashcard[]
   battleRounds      BattleRound[]
+  interviewRounds   InterviewRound[]
 
   @@index([userProfileId])
   @@index([problemId])
@@ -172,7 +314,7 @@ model Attempt {
 }
 
 model AIReview {
-  id                  String      @id @default(cuid())
+  id                  String           @id @default(cuid())
   userProfileId       String
   attemptId           String
   problemId           String
@@ -181,16 +323,17 @@ model AIReview {
   implementationScore Int
   complexityScore     Int
   explanationScore    Int
-  feedbackSummary     String      @db.Text
-  strengths           String[]    @default([])
-  weaknesses          String[]    @default([])
-  complexityFeedback  String      @db.Text
-  suggestedNextStep   String      @db.Text
-  createdAt           DateTime    @default(now())
-  userProfile         UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
-  attempt             Attempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  problem             Problem     @relation(fields: [problemId], references: [id], onDelete: Restrict)
-  pattern             Pattern     @relation(fields: [patternId], references: [id], onDelete: Restrict)
+  feedbackSummary     String           @db.Text
+  strengths           String[]         @default([])
+  weaknesses          String[]         @default([])
+  complexityFeedback  String           @db.Text
+  suggestedNextStep   String           @db.Text
+  createdAt           DateTime         @default(now())
+  userProfile         UserProfile      @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  attempt             Attempt          @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  problem             Problem          @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  pattern             Pattern          @relation(fields: [patternId], references: [id], onDelete: Restrict)
+  interviewRounds     InterviewRound[]
 
   @@index([userProfileId])
   @@index([attemptId])
@@ -388,5 +531,265 @@ model GameEvent {
 
   @@index([userProfileId])
   @@index([eventType])
+  @@index([createdAt])
+}
+
+model Recommendation {
+  id                 String                   @id @default(cuid())
+  userProfileId      String
+  recommendationType RecommendationType
+  priority           Int
+  status             RecommendationStatus     @default(Active)
+  title              String
+  reason             String                   @db.Text
+  targetPatternId    String?
+  secondaryPatternId String?
+  problemId          String?
+  battleType         BattleType?
+  metadata           Json                     @default("{}")
+  expiresAt          DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  userProfile        UserProfile              @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  targetPattern      Pattern?                 @relation("RecommendationTargetPattern", fields: [targetPatternId], references: [id], onDelete: Restrict)
+  secondaryPattern   Pattern?                 @relation("RecommendationSecondaryPattern", fields: [secondaryPatternId], references: [id], onDelete: Restrict)
+  problem            Problem?                 @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  feedback           RecommendationFeedback[]
+
+  @@index([userProfileId])
+  @@index([recommendationType])
+  @@index([status])
+  @@index([priority])
+  @@index([targetPatternId])
+  @@index([secondaryPatternId])
+  @@index([problemId])
+  @@index([createdAt])
+}
+
+model PatternInsight {
+  id            String          @id @default(cuid())
+  userProfileId String
+  patternId     String
+  insightType   InsightType
+  severity      InsightSeverity
+  summary       String          @db.Text
+  evidence      Json            @default("{}")
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  userProfile   UserProfile     @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  pattern       Pattern         @relation(fields: [patternId], references: [id], onDelete: Restrict)
+
+  @@index([userProfileId])
+  @@index([patternId])
+  @@index([insightType])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+model PatternConfusion {
+  id                String      @id @default(cuid())
+  userProfileId     String
+  selectedPatternId String
+  correctPatternId  String
+  count             Int         @default(0)
+  lastSeenAt        DateTime
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  userProfile       UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  selectedPattern   Pattern     @relation("SelectedConfusionPattern", fields: [selectedPatternId], references: [id], onDelete: Restrict)
+  correctPattern    Pattern     @relation("CorrectConfusionPattern", fields: [correctPatternId], references: [id], onDelete: Restrict)
+
+  @@unique([userProfileId, selectedPatternId, correctPatternId])
+  @@index([userProfileId])
+  @@index([selectedPatternId])
+  @@index([correctPatternId])
+  @@index([createdAt])
+}
+
+model LearningPlan {
+  id            String             @id @default(cuid())
+  userProfileId String
+  title         String
+  goal          String             @db.Text
+  status        LearningPlanStatus @default(Active)
+  startDate     DateTime
+  endDate       DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  userProfile   UserProfile        @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  steps         LearningPlanStep[]
+
+  @@index([userProfileId])
+  @@index([status])
+  @@index([startDate])
+  @@index([createdAt])
+}
+
+model LearningPlanStep {
+  id              String                 @id @default(cuid())
+  learningPlanId  String
+  dayIndex        Int
+  stepType        String
+  title           String
+  targetPatternId String?
+  problemId       String?
+  targetCount     Int?
+  status          LearningPlanStepStatus @default(Pending)
+  dueDate         DateTime
+  completedAt     DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  learningPlan    LearningPlan           @relation(fields: [learningPlanId], references: [id], onDelete: Cascade)
+  targetPattern   Pattern?               @relation(fields: [targetPatternId], references: [id], onDelete: Restrict)
+  problem         Problem?               @relation(fields: [problemId], references: [id], onDelete: Restrict)
+
+  @@index([learningPlanId])
+  @@index([targetPatternId])
+  @@index([problemId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([createdAt])
+}
+
+model RecommendationFeedback {
+  id               String                     @id @default(cuid())
+  userProfileId    String
+  recommendationId String
+  feedbackType     RecommendationFeedbackType
+  note             String?                    @db.Text
+  createdAt        DateTime                   @default(now())
+  userProfile      UserProfile                @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  recommendation   Recommendation             @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+
+  @@index([userProfileId])
+  @@index([recommendationId])
+  @@index([feedbackType])
+  @@index([createdAt])
+}
+
+model InterviewSession {
+  id                      String                 @id @default(cuid())
+  userProfileId           String
+  interviewType           InterviewType
+  status                  InterviewStatus        @default(Active)
+  title                   String
+  targetPatternId         String?
+  difficultyTarget        Difficulty?
+  durationMinutes         Int
+  startedAt               DateTime               @default(now())
+  completedAt             DateTime?
+  overallScore            Int?
+  communicationScore      Int?
+  patternRecognitionScore Int?
+  problemSolvingScore     Int?
+  implementationScore     Int?
+  testingScore            Int?
+  complexityScore         Int?
+  timeManagementScore     Int?
+  result                  InterviewResult?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  userProfile             UserProfile            @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  targetPattern           Pattern?               @relation(fields: [targetPatternId], references: [id], onDelete: Restrict)
+  rounds                  InterviewRound[]
+  messages                InterviewMessage[]
+  feedbackRecords         InterviewFeedback[]
+  rubricScores            InterviewRubricScore[]
+
+  @@index([userProfileId])
+  @@index([targetPatternId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([completedAt])
+  @@index([createdAt])
+}
+
+model InterviewRound {
+  id                 String               @id @default(cuid())
+  interviewSessionId String
+  problemId          String
+  roundNumber        Int
+  status             InterviewRoundStatus @default(Pending)
+  startedAt          DateTime             @default(now())
+  completedAt        DateTime?
+  selectedPatternId  String?
+  correctPatternId   String
+  patternExplanation String?              @db.Text
+  approachText       String?              @db.Text
+  codeText           String?              @db.Text
+  testCasesText      String?              @db.Text
+  complexityText     String?              @db.Text
+  attemptId          String?
+  aiReviewId         String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  interviewSession   InterviewSession     @relation(fields: [interviewSessionId], references: [id], onDelete: Cascade)
+  problem            Problem              @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  selectedPattern    Pattern?             @relation("InterviewRoundSelectedPattern", fields: [selectedPatternId], references: [id], onDelete: Restrict)
+  correctPattern     Pattern              @relation("InterviewRoundCorrectPattern", fields: [correctPatternId], references: [id], onDelete: Restrict)
+  attempt            Attempt?             @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  aiReview           AIReview?            @relation(fields: [aiReviewId], references: [id], onDelete: SetNull)
+  messages           InterviewMessage[]
+  feedbackRecords    InterviewFeedback[]
+
+  @@unique([interviewSessionId, roundNumber])
+  @@index([interviewSessionId])
+  @@index([problemId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([completedAt])
+  @@index([createdAt])
+  @@index([selectedPatternId])
+  @@index([correctPatternId])
+  @@index([attemptId])
+  @@index([aiReviewId])
+}
+
+model InterviewMessage {
+  id                 String               @id @default(cuid())
+  interviewSessionId String
+  interviewRoundId   String?
+  role               InterviewMessageRole
+  content            String               @db.Text
+  phase              InterviewPhase
+  createdAt          DateTime             @default(now())
+  interviewSession   InterviewSession     @relation(fields: [interviewSessionId], references: [id], onDelete: Cascade)
+  interviewRound     InterviewRound?      @relation(fields: [interviewRoundId], references: [id], onDelete: Cascade)
+
+  @@index([interviewSessionId])
+  @@index([interviewRoundId])
+  @@index([phase])
+  @@index([createdAt])
+}
+
+model InterviewFeedback {
+  id                      String           @id @default(cuid())
+  interviewSessionId      String
+  interviewRoundId        String?
+  summary                 String           @db.Text
+  strengths               String[]         @default([])
+  weaknesses              String[]         @default([])
+  rubric                  Json             @default("{}")
+  followUpRecommendations String[]         @default([])
+  createdAt               DateTime         @default(now())
+  interviewSession        InterviewSession @relation(fields: [interviewSessionId], references: [id], onDelete: Cascade)
+  interviewRound          InterviewRound?  @relation(fields: [interviewRoundId], references: [id], onDelete: Cascade)
+
+  @@index([interviewSessionId])
+  @@index([interviewRoundId])
+  @@index([createdAt])
+}
+
+model InterviewRubricScore {
+  id                 String           @id @default(cuid())
+  interviewSessionId String
+  category           RubricCategory
+  score              Int
+  notes              String           @db.Text
+  createdAt          DateTime         @default(now())
+  interviewSession   InterviewSession @relation(fields: [interviewSessionId], references: [id], onDelete: Cascade)
+
+  @@index([interviewSessionId])
+  @@index([category])
   @@index([createdAt])
 }

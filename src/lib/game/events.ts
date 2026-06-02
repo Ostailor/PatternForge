@@ -15,16 +15,23 @@ const gameEventTypes = [
   GameEventType.AttemptCompleted,
   GameEventType.ReviewCompleted,
   GameEventType.BattleCompleted,
+  GameEventType.InterviewStarted,
+  GameEventType.InterviewCompleted,
+  GameEventType.InterviewStrongResult,
+  GameEventType.InterviewImprovement,
   GameEventType.QuestCompleted,
   GameEventType.AchievementEarned,
+  GameEventType.ContrastDrillCompleted,
 ] as const;
 
 const sourceMetadataKeys = [
   ["attemptId", "attempt"],
   ["reviewLogId", "reviewLog"],
   ["battleId", "battle"],
+  ["interviewId", "interview"],
   ["questId", "quest"],
   ["achievementId", "achievement"],
+  ["contrastDrillId", "contrastDrill"],
 ] as const;
 
 type GameEventWriteClient = Pick<ReturnType<typeof getPrisma>, "gameEvent">;
@@ -34,8 +41,13 @@ function createEmptyBreakdown(): XPBreakdown {
     AttemptCompleted: 0,
     ReviewCompleted: 0,
     BattleCompleted: 0,
+    InterviewStarted: 0,
+    InterviewCompleted: 0,
+    InterviewStrongResult: 0,
+    InterviewImprovement: 0,
     QuestCompleted: 0,
     AchievementEarned: 0,
+    ContrastDrillCompleted: 0,
     total: 0,
   };
 }
