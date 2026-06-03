@@ -22,7 +22,12 @@ export type RecommendationType =
   | "DailyForge"
   | "DebugDrill"
   | "TestingPractice"
-  | "ImplementationPractice";
+  | "ImplementationPractice"
+  | "VoiceInterview"
+  | "SpeakingDrill"
+  | "ExplainPattern"
+  | "ComplexityNarration"
+  | "TestingNarration";
 
 export type RecommendationBattleType =
   | "PatternBoss"

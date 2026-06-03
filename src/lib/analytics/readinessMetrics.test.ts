@@ -101,6 +101,7 @@ test("calculates readiness score categories from pattern metrics", () => {
   assert.equal(scores.retention, 70);
   assert.equal(scores.bossBattlePerformance, 50);
   assert.equal(scores.interviewPerformance, 60);
+  assert.equal(scores.codeExecutionDebugging, 60);
+  assert.equal(scores.communication, 60);
   assert.equal(scores.confidence, 70);
-  assert.equal(scores.mistakeRecovery, 94);
 });

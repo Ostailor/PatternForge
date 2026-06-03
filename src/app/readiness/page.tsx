@@ -52,9 +52,14 @@ const scoreLabels: Array<{
     description: "Timed mock interview scores with a light baseline before your first mock.",
   },
   {
-    key: "mistakeRecovery",
-    label: "Mistake recovery",
-    description: "Review follow-through adjusted for lapses and confusions.",
+    key: "codeExecutionDebugging",
+    label: "Code execution/debugging",
+    description: "Custom test pass rate, runtime stability, and testing discipline.",
+  },
+  {
+    key: "communication",
+    label: "Communication",
+    description: "Spoken mock interview clarity, structure, concision, and technical explanation.",
   },
   {
     key: "confidence",
@@ -180,9 +185,9 @@ export default async function ReadinessPage() {
             <p className="mt-4 max-w-3xl text-sm font-semibold leading-6 text-slate-300">
               PatternForge estimates interview readiness from your attempts,
               pattern recognition, solve consistency, review retention, battle
-              outcomes, timed mock interviews, code execution signals, mistake
-              recovery, and confidence. It is a training signal, not a promise
-              or guarantee of interview outcomes.
+              outcomes, timed mock interviews, code execution signals, spoken
+              communication, and confidence. It is a training signal, not a
+              promise or guarantee of interview outcomes.
             </p>
           </div>
           <div className="rounded-lg border border-white/10 bg-white/5 p-5">
@@ -238,6 +243,16 @@ export default async function ReadinessPage() {
           value={`${report.codeExecution.customTestPassRate}%`}
           detail="Custom tests passed"
         />
+        <MetricTile
+          label="Voice mocks"
+          value={report.voiceCommunication.voiceInterviewsCompleted}
+          detail="Completed spoken interviews"
+        />
+        <MetricTile
+          label="Communication"
+          value={formatScore(report.voiceCommunication.averageCommunicationScore)}
+          detail="Voice score average"
+        />
       </section>
 
       <CodeExecutionSection report={report} />
@@ -257,6 +272,8 @@ export default async function ReadinessPage() {
         />
         <InterviewWeakSpotsSection report={report} />
       </section>
+
+      <SpokenCommunicationSection report={report} />
 
       <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -471,6 +488,131 @@ function PatternSignalList({
   );
 }
 
+function SpokenCommunicationSection({ report }: { report: ReadinessReport }) {
+  const voice = report.voiceCommunication;
+  const hasVoiceFeedback = voice.averageCommunicationScore !== null;
+
+  return (
+    <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+            Spoken Interview Communication
+          </p>
+          <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+            Voice Mode speaking signal
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
+            Voice Mode is optional. When you use it, PatternForge scores the
+            transcript for explanation quality and keeps technical interview
+            scoring separate.
+          </p>
+        </div>
+        <Link
+          href="/interviews?voiceMode=1"
+          className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700"
+        >
+          Try a voice mock interview.
+        </Link>
+      </div>
+
+      {!hasVoiceFeedback ? (
+        <div className="mt-5 rounded-lg border border-dashed border-teal-300 bg-teal-50 p-4">
+          <p className="text-sm font-black text-slate-950">
+            No scored voice interview yet.
+          </p>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">
+            The overall readiness score uses a light communication baseline
+            until you complete a voice mock, so missing voice data is not a
+            heavy penalty.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MiniMetric
+          label="Voice interviews completed"
+          value={voice.voiceInterviewsCompleted}
+          detail="Completed Voice Mode sessions"
+        />
+        <MiniMetric
+          label="Average clarity"
+          value={formatScore(voice.averageClarityScore)}
+          detail="Understandable explanations"
+        />
+        <MiniMetric
+          label="Average structure"
+          value={formatScore(voice.averageStructureScore)}
+          detail="Plan before details"
+        />
+        <MiniMetric
+          label="Average conciseness"
+          value={formatScore(voice.averageConcisenessScore)}
+          detail="Focused answers"
+        />
+        <MiniMetric
+          label="Technical explanation"
+          value={formatScore(voice.averageTechnicalExplanationScore)}
+          detail="Pattern, invariant, tests, complexity"
+        />
+        <MiniMetric
+          label="Common weakness"
+          value={voice.commonCommunicationWeakness ?? "No data"}
+          detail="Most repeated speaking gap"
+        />
+        <MiniMetric
+          label="Best strength"
+          value={voice.bestCommunicationStrength ?? "No data"}
+          detail="Most repeated positive signal"
+        />
+        <MiniMetric
+          label="Overall communication"
+          value={formatScore(voice.averageCommunicationScore)}
+          detail="Readiness weighting input"
+        />
+      </div>
+
+      <ScoreTrend
+        points={voice.scoreTrend}
+        emptyText="No scored voice interviews yet."
+      />
+
+      <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+          Communication recommendations
+        </p>
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          {voice.recommendedPractice.length === 0 ? (
+            <p className="text-sm font-semibold leading-6 text-slate-600">
+              Your voice communication signal is solid. Keep practicing concise
+              pattern justification, edge cases, and complexity explanations.
+            </p>
+          ) : (
+            voice.recommendedPractice.map((recommendation) => (
+              <Link
+                key={`${recommendation.title}:${recommendation.href}`}
+                href={recommendation.href}
+                className="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-teal-200 hover:bg-teal-50"
+              >
+                <p className="text-sm font-black text-slate-950">
+                  {recommendation.title}
+                </p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+                  {recommendation.reason}
+                </p>
+              </Link>
+            ))
+          )}
+        </div>
+        <p className="mt-4 text-xs font-semibold leading-5 text-slate-600">
+          Communication feedback is based on transcripts, not vocal tone, and
+          does not guarantee interview success.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function InterviewPerformanceSection({ report }: { report: ReadinessReport }) {
   const performance = report.interviewPerformance;
 
@@ -598,7 +740,13 @@ function RecommendedNextMockSection({ report }: { report: ReadinessReport }) {
   );
 }
 
-function ScoreTrend({ points }: { points: InterviewScoreTrendPoint[] }) {
+function ScoreTrend({
+  points,
+  emptyText = "No scored mock interviews yet.",
+}: {
+  points: InterviewScoreTrendPoint[];
+  emptyText?: string;
+}) {
   return (
     <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
       <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
@@ -606,7 +754,7 @@ function ScoreTrend({ points }: { points: InterviewScoreTrendPoint[] }) {
       </p>
       {points.length === 0 ? (
         <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-          No scored mock interviews yet.
+          {emptyText}
         </p>
       ) : (
         <div className="mt-4 flex h-28 items-end gap-2">

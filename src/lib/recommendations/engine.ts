@@ -40,8 +40,10 @@ import {
   buildLearningPlanStepRecommendation,
   buildMockInterviewRecommendation,
   buildReadyForBossRecommendation,
+  buildSpeakingDrillRecommendation,
   buildSuccessfulSelfTestsRecommendation,
   buildTestingPracticeRecommendation,
+  buildVoiceInterviewRecommendation,
   buildWeaknessRepairInterviewRecommendation,
   buildWeakPatternRecommendation,
 } from "./insightGenerator";
@@ -54,7 +56,7 @@ import {
   pickContrastProblem,
   pickPracticeProblemForPattern,
 } from "./problemPicker";
-import type { RecommendationCandidate } from "./types";
+import type { RecommendationCandidate, RecommendationType } from "./types";
 
 const DUE_REVIEW_THRESHOLD = 3;
 const CONFUSION_THRESHOLD = 2;
@@ -66,6 +68,19 @@ const LOW_TESTS_PER_RUN_THRESHOLD = 1.5;
 const STRONG_RECOGNITION_THRESHOLD = 75;
 const HIGH_MASTERY_THRESHOLD = 76;
 const REPEATED_RUNTIME_ERROR_THRESHOLD = 2;
+const LOW_COMMUNICATION_SCORE_THRESHOLD = 65;
+const LOW_TECHNICAL_EXPLANATION_THRESHOLD = 65;
+const VOICE_RECOMMENDATION_COOLDOWN_DAYS = 7;
+const VOICE_AVOIDANCE_COOLDOWN_DAYS = 21;
+const VOICE_AVOIDANCE_FEEDBACK_THRESHOLD = 2;
+
+const voiceRecommendationTypes: RecommendationType[] = [
+  "VoiceInterview",
+  "SpeakingDrill",
+  "ExplainPattern",
+  "ComplexityNarration",
+  "TestingNarration",
+];
 
 type RecommendationStatusUpdateResult =
   | { status: "updated"; recommendationId: string }
@@ -638,6 +653,351 @@ function hasHighReadiness(patternMetrics: PatternMetric[]): boolean {
   );
 }
 
+function hasStrongCodingSignal({
+  patternMetrics,
+  codeExecution,
+}: {
+  patternMetrics: PatternMetric[];
+  codeExecution: CodeExecutionMetrics;
+}): boolean {
+  const runtimeStability = Math.max(
+    0,
+    100 - codeExecution.runtimeErrorRate - codeExecution.timeoutRate,
+  );
+  const practicedPatterns = patternMetrics.filter((metric) => metric.attemptsCount > 0);
+  const averageMastery =
+    average(practicedPatterns.map((metric) => metric.masteryScore)) ?? 0;
+
+  return (
+    (codeExecution.totalCodeRuns >= 2 &&
+      codeExecution.customTestPassRate >= 75 &&
+      runtimeStability >= 70) ||
+    (practicedPatterns.length >= 3 && averageMastery >= 70)
+  );
+}
+
+function averageVoiceFeedbackScore(feedback: {
+  clarityScore: number;
+  structureScore: number;
+  concisenessScore: number;
+  confidenceScore: number;
+  technicalExplanationScore: number;
+}): number {
+  return Math.round(
+    (feedback.clarityScore +
+      feedback.structureScore +
+      feedback.concisenessScore +
+      feedback.confidenceScore +
+      feedback.technicalExplanationScore) /
+      5,
+  );
+}
+
+async function shouldThrottleVoiceRecommendations(
+  userProfileId: string,
+  now = new Date(),
+): Promise<boolean> {
+  const avoidanceCutoff = new Date(
+    now.getTime() - 60 * 24 * 60 * 60 * 1000,
+  );
+  const [latestVoiceRecommendation, notRelevantCount] = await Promise.all([
+    getPrisma().recommendation.findFirst({
+      where: {
+        userProfileId,
+        recommendationType: { in: voiceRecommendationTypes },
+      },
+      select: {
+        createdAt: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    }),
+    getPrisma().recommendationFeedback.count({
+      where: {
+        userProfileId,
+        feedbackType: "NotRelevant",
+        createdAt: { gte: avoidanceCutoff },
+        recommendation: {
+          recommendationType: { in: voiceRecommendationTypes },
+        },
+      },
+    }),
+  ]);
+
+  if (!latestVoiceRecommendation) {
+    return false;
+  }
+
+  const cooldownDays =
+    notRelevantCount >= VOICE_AVOIDANCE_FEEDBACK_THRESHOLD
+      ? VOICE_AVOIDANCE_COOLDOWN_DAYS
+      : VOICE_RECOMMENDATION_COOLDOWN_DAYS;
+  const cooldownCutoff = new Date(
+    now.getTime() - cooldownDays * 24 * 60 * 60 * 1000,
+  );
+
+  return latestVoiceRecommendation.createdAt >= cooldownCutoff;
+}
+
+async function getCommunicationRecommendation({
+  userProfileId,
+  patternMetrics,
+  codeExecution,
+}: {
+  userProfileId: string;
+  patternMetrics: PatternMetric[];
+  codeExecution: CodeExecutionMetrics;
+}): Promise<RecommendationCandidate | null> {
+  if (await shouldThrottleVoiceRecommendations(userProfileId)) {
+    return null;
+  }
+
+  const [
+    completedVoiceInterviewCount,
+    latestVoiceFeedback,
+    missingInvariantInsight,
+    missingInvariantCount,
+    weakComplexityCount,
+    weakTestingCount,
+    lowInterviewCommunication,
+  ] = await Promise.all([
+    getPrisma().voiceSession.count({
+      where: {
+        userProfileId,
+        status: "Completed",
+        turns: {
+          some: {
+            speaker: "User",
+          },
+        },
+        interviewSession: {
+          userProfileId,
+          status: "Completed",
+        },
+      },
+    }),
+    getPrisma().voiceFeedback.findFirst({
+      where: {
+        userProfileId,
+        interviewSession: {
+          userProfileId,
+          status: "Completed",
+        },
+      },
+      select: {
+        id: true,
+        clarityScore: true,
+        structureScore: true,
+        concisenessScore: true,
+        confidenceScore: true,
+        technicalExplanationScore: true,
+        weaknesses: true,
+        interviewSession: {
+          select: {
+            id: true,
+          },
+        },
+        communicationInsights: {
+          select: {
+            insightType: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    getPrisma().communicationInsight.findFirst({
+      where: {
+        userProfileId,
+        insightType: "MissingInvariant",
+        voiceFeedbackId: { not: null },
+      },
+      select: {
+        id: true,
+        summary: true,
+        interviewSession: {
+          select: {
+            rounds: {
+              select: {
+                correctPatternId: true,
+                problemId: true,
+                correctPattern: {
+                  select: {
+                    name: true,
+                  },
+                },
+              },
+              orderBy: { roundNumber: "asc" },
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    getPrisma().communicationInsight.count({
+      where: {
+        userProfileId,
+        insightType: "MissingInvariant",
+        voiceFeedbackId: { not: null },
+      },
+    }),
+    getPrisma().communicationInsight.count({
+      where: {
+        userProfileId,
+        insightType: "WeakComplexityExplanation",
+        voiceFeedbackId: { not: null },
+      },
+    }),
+    getPrisma().communicationInsight.count({
+      where: {
+        userProfileId,
+        insightType: "WeakTestingExplanation",
+        voiceFeedbackId: { not: null },
+      },
+    }),
+    getPrisma().interviewSession.findFirst({
+      where: {
+        userProfileId,
+        status: "Completed",
+        communicationScore: { lte: LOW_COMMUNICATION_SCORE_THRESHOLD },
+      },
+      select: {
+        id: true,
+        communicationScore: true,
+      },
+      orderBy: [{ completedAt: "desc" }, { createdAt: "desc" }],
+    }),
+  ]);
+  const strongCodingSignal = hasStrongCodingSignal({
+    patternMetrics,
+    codeExecution,
+  });
+  const latestCommunicationScore = latestVoiceFeedback
+    ? averageVoiceFeedbackScore(latestVoiceFeedback)
+    : lowInterviewCommunication?.communicationScore ?? null;
+  const missingInvariantRound =
+    missingInvariantInsight?.interviewSession?.rounds[0] ?? null;
+  const hasWeakTestingExplanation =
+    weakTestingCount > 0 ||
+    latestVoiceFeedback?.communicationInsights.some(
+      (insight) => insight.insightType === "WeakTestingExplanation",
+    ) ||
+    latestVoiceFeedback?.weaknesses.some((weakness) =>
+      weakness.toLowerCase().includes("test"),
+    );
+  const hasWeakComplexityExplanation =
+    weakComplexityCount > 0 ||
+    (latestVoiceFeedback?.technicalExplanationScore ?? 100) <=
+      LOW_TECHNICAL_EXPLANATION_THRESHOLD;
+
+  if (missingInvariantCount >= 2) {
+    return buildSpeakingDrillRecommendation({
+      recommendationType: "ExplainPattern",
+      title: missingInvariantRound?.correctPattern.name
+        ? `Explain ${missingInvariantRound.correctPattern.name} invariants`
+        : "Explain pattern invariants",
+      reason:
+        "Spoken feedback repeatedly flagged missing invariants. Practice explaining the maintained state before implementation details.",
+      patternId: missingInvariantRound?.correctPatternId,
+      problemId: missingInvariantRound?.problemId,
+      metadata: {
+        reasonCode: "repeated_spoken_missing_invariant",
+        missingInvariantCount,
+        communicationInsightId: missingInvariantInsight?.id,
+      },
+      evidence: [
+        `${missingInvariantCount} MissingInvariant communication insight${missingInvariantCount === 1 ? "" : "s"}`,
+        missingInvariantInsight?.summary ?? "Latest spoken answer missed invariant reasoning",
+      ],
+    });
+  }
+
+  if (hasWeakComplexityExplanation) {
+    return buildSpeakingDrillRecommendation({
+      recommendationType: "ComplexityNarration",
+      title: "Practice complexity narration",
+      reason:
+        "Voice feedback shows weak complexity explanation. Practice tying Big-O terms to loops, data structures, and maintained state.",
+      metadata: {
+        reasonCode: "weak_spoken_complexity_explanation",
+        weakComplexityCount,
+        voiceFeedbackId: latestVoiceFeedback?.id,
+        technicalExplanationScore:
+          latestVoiceFeedback?.technicalExplanationScore ?? null,
+      },
+      evidence: [
+        latestVoiceFeedback
+          ? `Technical explanation score: ${latestVoiceFeedback.technicalExplanationScore}%`
+          : `${weakComplexityCount} weak complexity insight${weakComplexityCount === 1 ? "" : "s"}`,
+      ],
+    });
+  }
+
+  if (hasWeakTestingExplanation) {
+    return buildSpeakingDrillRecommendation({
+      recommendationType: "TestingNarration",
+      title: "Practice testing narration",
+      reason:
+        "Voice feedback flagged weak testing explanation. Narrate normal cases, edge cases, and verification before relying on code.",
+      metadata: {
+        reasonCode: "weak_spoken_testing_explanation",
+        weakTestingCount,
+        voiceFeedbackId: latestVoiceFeedback?.id,
+      },
+      evidence: [
+        weakTestingCount > 0
+          ? `${weakTestingCount} weak testing explanation insight${weakTestingCount === 1 ? "" : "s"}`
+          : "Latest voice feedback mentioned testing explanation weakness",
+      ],
+    });
+  }
+
+  if (
+    strongCodingSignal &&
+    latestCommunicationScore !== null &&
+    latestCommunicationScore <= LOW_COMMUNICATION_SCORE_THRESHOLD
+  ) {
+    return buildSpeakingDrillRecommendation({
+      recommendationType: "SpeakingDrill",
+      title: "Practice speaking through a solved approach",
+      reason:
+        "Your coding signal is stronger than your communication signal. Use a short speaking drill to practice making reasoning easier to follow.",
+      metadata: {
+        reasonCode: "strong_coding_weak_communication",
+        communicationScore: latestCommunicationScore,
+        customTestPassRate: codeExecution.customTestPassRate,
+        totalCodeRuns: codeExecution.totalCodeRuns,
+      },
+      evidence: [
+        `Communication score: ${latestCommunicationScore}%`,
+        `Custom test pass rate: ${codeExecution.customTestPassRate}%`,
+      ],
+    });
+  }
+
+  if (
+    completedVoiceInterviewCount === 0 &&
+    (hasHighReadiness(patternMetrics) || strongCodingSignal)
+  ) {
+    return buildVoiceInterviewRecommendation({
+      title: "Try a voice mock interview",
+      reason:
+        "Your readiness signals are decent, but there is no completed voice interview yet. Add one spoken mock to baseline communication without replacing technical practice.",
+      metadata: {
+        reasonCode: "decent_readiness_no_voice_interviews",
+        completedVoiceInterviewCount,
+      },
+      evidence: [
+        "No completed voice interviews",
+        strongCodingSignal ? "Strong coding signal" : "Decent readiness signal",
+      ],
+    });
+  }
+
+  return null;
+}
+
 async function getInterviewReadinessRecommendation({
   userProfileId,
   patternMetrics,
@@ -952,6 +1312,7 @@ export async function generateRecommendations(
     activeBattleRecommendation,
     activeInterviewRecommendation,
     highWeaknessRecommendation,
+    communicationRecommendation,
     confusionRecommendation,
     failedBattleRecommendation,
     learningPlanStepRecommendation,
@@ -965,6 +1326,11 @@ export async function generateRecommendations(
       userProfileId: scopedUserProfileId,
       patternMetrics,
       feedbackProfile,
+    }),
+    getCommunicationRecommendation({
+      userProfileId: scopedUserProfileId,
+      patternMetrics,
+      codeExecution,
     }),
     getConfusionRecommendation(scopedUserProfileId, feedbackProfile),
     getFailedBattleRecommendation(scopedUserProfileId, feedbackProfile),
@@ -992,6 +1358,7 @@ export async function generateRecommendations(
       activeBattleRecommendation,
       activeInterviewRecommendation,
       highWeaknessRecommendation,
+      communicationRecommendation,
       interviewReadinessRecommendation,
       confusionRecommendation,
       failedBattleRecommendation,

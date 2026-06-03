@@ -26,6 +26,22 @@ function getAchievementDefinition(key: string) {
   return achievementDefinitions.find((achievement) => achievement.key === key);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readMetadataString(value: unknown, key: string): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const metadataValue = value[key];
+
+  return typeof metadataValue === "string" && metadataValue.trim()
+    ? metadataValue
+    : null;
+}
+
 function toSolvedStatus(solvedStatus: string): Attempt["solvedStatus"] {
   switch (solvedStatus) {
     case "Solved":
@@ -148,6 +164,9 @@ async function getAchievementProgress(client: AchievementClient, userProfileId: 
     victoryCount,
     reviewGauntletCount,
     interviews,
+    completedVoiceInterviewCount,
+    voiceFeedback,
+    speakingDrillEvents,
   ] =
     await Promise.all([
       client.attempt.findMany({
@@ -189,6 +208,34 @@ async function getAchievementProgress(client: AchievementClient, userProfileId: 
         },
         orderBy: [{ completedAt: "asc" }, { createdAt: "asc" }],
       }),
+      client.voiceSession.count({
+        where: {
+          userProfileId,
+          status: "Completed",
+          turns: {
+            some: {
+              speaker: "User",
+            },
+          },
+        },
+      }),
+      client.voiceFeedback.findMany({
+        where: { userProfileId },
+        select: {
+          clarityScore: true,
+          structureScore: true,
+          technicalExplanationScore: true,
+        },
+      }),
+      client.gameEvent.findMany({
+        where: {
+          userProfileId,
+          eventType: GameEventType.SpeakingDrillCompleted,
+        },
+        select: {
+          metadata: true,
+        },
+      }),
     ]);
   const appAttempts = attempts.map(toAchievementAttempt);
   const progress = progressFromAttempts(appAttempts);
@@ -214,6 +261,9 @@ async function getAchievementProgress(client: AchievementClient, userProfileId: 
     },
     0,
   );
+  const complexitySpeakingDrillCount = speakingDrillEvents.filter(
+    (event) => readMetadataString(event.metadata, "drillType") === "complexity",
+  ).length;
 
   return {
     attemptCount: attempts.length,
@@ -238,6 +288,17 @@ async function getAchievementProgress(client: AchievementClient, userProfileId: 
     ),
     hasInterviewReady: interviewScores.some((score) => score >= 85),
     bestInterviewImprovement,
+    completedVoiceInterviewCount,
+    hasClearExplainer: voiceFeedback.some(
+      (feedback) => feedback.clarityScore >= 85,
+    ),
+    hasStructuredThinker: voiceFeedback.some(
+      (feedback) => feedback.structureScore >= 85,
+    ),
+    hasPatternNarrator: voiceFeedback.some(
+      (feedback) => feedback.technicalExplanationScore >= 85,
+    ),
+    complexitySpeakingDrillCount,
   };
 }
 
@@ -261,6 +322,11 @@ export async function checkAchievementsWithClient(
     progress.hasEdgeCaseHunter ? "edge-case-hunter" : "",
     progress.hasInterviewReady ? "interview-ready" : "",
     progress.bestInterviewImprovement >= 20 ? "comeback-candidate" : "",
+    progress.completedVoiceInterviewCount >= 1 ? "first-spoken-forge" : "",
+    progress.hasClearExplainer ? "clear-explainer" : "",
+    progress.hasStructuredThinker ? "structured-thinker" : "",
+    progress.hasPatternNarrator ? "pattern-narrator" : "",
+    progress.complexitySpeakingDrillCount >= 5 ? "complexity-speaker" : "",
   ].filter(Boolean);
 
   for (const achievementKey of earnedKeys) {

@@ -118,6 +118,7 @@ export type DashboardGamificationData = {
     achievementsEarned: number;
     battlesCompleted: number;
     questsCompleted: number;
+    voiceEvents: number;
   };
   achievementsPreview: DashboardAchievementPreview;
 };
@@ -337,6 +338,18 @@ function formatEventTitle(
         (questId ? lookups.quests.get(questId) : null) ?? "Daily objective"
       }`;
     }
+    case "VoiceInterviewCompleted": {
+      const interviewId = readJsonString(event.metadata, "interviewId");
+
+      return `Voice interview: ${
+        (interviewId ? lookups.interviews.get(interviewId) : null) ??
+        "Mock interview"
+      }`;
+    }
+    case "SpeakingDrillCompleted":
+      return "Speaking drill completed";
+    case "CommunicationInsightCreated":
+      return "Communication insight logged";
     case "AttemptCompleted":
       return "Practice attempt completed";
     case "ReviewCompleted":
@@ -420,6 +433,12 @@ async function getRecentDashboardEvents(
     ).length,
     questsCompleted: events.filter((event) => event.eventType === "QuestCompleted")
       .length,
+    voiceEvents: events.filter(
+      (event) =>
+        event.eventType === "VoiceInterviewCompleted" ||
+        event.eventType === "SpeakingDrillCompleted" ||
+        event.eventType === "CommunicationInsightCreated",
+    ).length,
   };
 }
 

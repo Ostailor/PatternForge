@@ -1,5 +1,6 @@
 import type {
   InterviewPhase,
+  VoiceSpeaker,
   InterviewType,
   RubricCategory,
 } from "@/generated/prisma/enums";
@@ -108,6 +109,37 @@ export type AIInterviewMessageInput = {
   content: string;
 };
 
+export type AIInterviewVoiceTurnInput = {
+  phase: InterviewPhase;
+  speaker: VoiceSpeaker;
+  transcript: string;
+  durationMs?: number | null;
+  createdAt?: string | null;
+};
+
+export type AIInterviewCodeExecutionInput = {
+  didRun: boolean;
+  latestRunStatus: string | null;
+  runtimeMs: number | null;
+  totalTests: number;
+  testsPassed: number;
+  testsFailed: number;
+  successfulRunCount: number;
+  failedRunCount: number;
+  userCreatedTestCount: number;
+  fixedAfterFailedRun: boolean;
+  stdout: string;
+  stderr: string;
+  runtimeError: string | null;
+  failedTestSummaries: {
+    name: string;
+    inputJson: unknown;
+    expectedOutputJson: unknown;
+    actualOutputJson: unknown;
+    errorMessage: string | null;
+  }[];
+};
+
 export type AIInterviewPhaseData = {
   selectedPatternName?: string | null;
   patternExplanation?: string | null;
@@ -127,7 +159,11 @@ export type AIInterviewerInput = {
   correctPattern: string;
   secondaryPatterns: string[];
   previousMessages: AIInterviewMessageInput[];
+  previousVoiceTurns: AIInterviewVoiceTurnInput[];
+  currentPhaseVoiceTurns: AIInterviewVoiceTurnInput[];
   userInput: string;
+  userInputWasSpoken: boolean;
+  codeExecution: AIInterviewCodeExecutionInput | null;
   currentPhaseData: AIInterviewPhaseData;
   canRevealCorrectPattern: boolean;
 };

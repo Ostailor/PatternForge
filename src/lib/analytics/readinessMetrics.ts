@@ -24,6 +24,7 @@ import type {
   ReadinessNextSevenDay,
   ReadinessPatternSectionItem,
   ReadinessReport,
+  VoiceCommunicationMetrics,
 } from "./types";
 
 const READY_MASTERY_THRESHOLD = 76;
@@ -32,6 +33,8 @@ const RISK_MASTERY_THRESHOLD = 51;
 const RISK_RETENTION_THRESHOLD = 60;
 const PRACTICE_VOLUME_TARGET = 30;
 const NO_INTERVIEW_SCORE_BASELINE = 60;
+const NO_CODE_EXECUTION_SCORE_BASELINE = 60;
+const NO_VOICE_COMMUNICATION_SCORE_BASELINE = 60;
 
 const rubricCategories: RubricCategory[] = [
   "Communication",
@@ -87,6 +90,30 @@ function readMissedSignals(value: unknown): string[] {
   return missedSignals.filter(
     (missedSignal): missedSignal is string =>
       typeof missedSignal === "string" && missedSignal.trim().length > 0,
+  );
+}
+
+function getTopCountedText(values: string[]): string | null {
+  const counts = new Map<string, { value: string; count: number }>();
+
+  for (const value of values) {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    const key = trimmed.toLowerCase();
+    const current = counts.get(key) ?? { value: trimmed, count: 0 };
+    current.count += 1;
+    counts.set(key, current);
+  }
+
+  return (
+    Array.from(counts.values()).sort(
+      (left, right) =>
+        right.count - left.count || left.value.localeCompare(right.value),
+    )[0]?.value ?? null
   );
 }
 
@@ -450,6 +477,196 @@ function getInterviewPerformanceScore(
   );
 }
 
+function getCodeExecutionReadinessScore(
+  codeExecution: ReadinessReport["codeExecution"],
+): number {
+  if (codeExecution.totalCodeRuns === 0) {
+    return NO_CODE_EXECUTION_SCORE_BASELINE;
+  }
+
+  const runtimeStability = Math.max(
+    0,
+    100 - codeExecution.runtimeErrorRate - codeExecution.timeoutRate,
+  );
+  const testingDiscipline = clampScore(
+    (Math.min(codeExecution.averageTestsPerRun, 4) / 4) * 100,
+  );
+
+  return clampScore(
+    codeExecution.customTestPassRate * 0.55 +
+      runtimeStability * 0.25 +
+      testingDiscipline * 0.2,
+  );
+}
+
+function getVoiceCommunicationReadinessScore(
+  voiceCommunication: VoiceCommunicationMetrics,
+): number {
+  return (
+    voiceCommunication.averageCommunicationScore ??
+    NO_VOICE_COMMUNICATION_SCORE_BASELINE
+  );
+}
+
+async function getVoiceCommunicationMetrics(
+  userProfileId: string,
+): Promise<VoiceCommunicationMetrics> {
+  const prisma = getPrisma();
+  const [voiceInterviewsCompleted, feedbackRecords] = await Promise.all([
+    prisma.voiceSession.count({
+      where: {
+        userProfileId,
+        status: "Completed",
+        turns: {
+          some: {
+            speaker: "User",
+          },
+        },
+        interviewSession: {
+          userProfileId,
+          status: "Completed",
+        },
+      },
+    }),
+    prisma.voiceFeedback.findMany({
+      where: {
+        userProfileId,
+        interviewSession: {
+          userProfileId,
+          status: "Completed",
+        },
+      },
+      select: {
+        id: true,
+        clarityScore: true,
+        structureScore: true,
+        concisenessScore: true,
+        confidenceScore: true,
+        technicalExplanationScore: true,
+        strengths: true,
+        weaknesses: true,
+        createdAt: true,
+        interviewSession: {
+          select: {
+            id: true,
+            title: true,
+            completedAt: true,
+          },
+        },
+        communicationInsights: {
+          select: {
+            insightType: true,
+            summary: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    }),
+  ]);
+
+  const communicationScores = feedbackRecords.map((feedback) =>
+    clampScore(
+      (feedback.clarityScore +
+        feedback.structureScore +
+        feedback.concisenessScore +
+        feedback.confidenceScore +
+        feedback.technicalExplanationScore) /
+        5,
+    ),
+  );
+  const averageCommunicationScore = average(communicationScores);
+  const insightTypes = feedbackRecords.flatMap((feedback) =>
+    feedback.communicationInsights.map((insight) => insight.insightType),
+  );
+  const commonCommunicationWeakness = getTopCountedText(
+    feedbackRecords.flatMap((feedback) => feedback.weaknesses),
+  );
+  const bestCommunicationStrength = getTopCountedText(
+    feedbackRecords.flatMap((feedback) => feedback.strengths),
+  );
+  const recommendedPractice: VoiceCommunicationMetrics["recommendedPractice"] = [];
+
+  if (
+    averageCommunicationScore !== null &&
+    averageCommunicationScore < 65
+  ) {
+    recommendedPractice.push({
+      title: "Try a voice mock interview.",
+      reason:
+        "A transcript-backed mock gives the clearest signal on explanation quality without replacing technical scoring.",
+      href: "/interviews?voiceMode=1",
+    });
+  }
+
+  const averageStructureScore = average(
+    feedbackRecords.map((feedback) => feedback.structureScore),
+  );
+
+  if (averageStructureScore !== null && averageStructureScore < 70) {
+    recommendedPractice.push({
+      title: "Run an approach explanation drill.",
+      reason:
+        "Practice stating the pattern, invariant, data structures, and plan before implementation details.",
+      href: "/drills/speaking?type=approach",
+    });
+  }
+
+  if (
+    insightTypes.includes("WeakTestingExplanation") ||
+    feedbackRecords.some((feedback) =>
+      feedback.weaknesses.some((weakness) =>
+        weakness.toLowerCase().includes("test"),
+      ),
+    )
+  ) {
+    recommendedPractice.push({
+      title: "Practice testing narration.",
+      reason:
+        "Explain normal cases, edge cases, and failure cases out loud before relying on code runs.",
+      href: "/drills/speaking?type=debugging",
+    });
+  }
+
+  if (voiceInterviewsCompleted === 0) {
+    recommendedPractice.push({
+      title: "Try a voice mock interview.",
+      reason:
+        "Voice Mode is optional, but one spoken mock will add a communication baseline to this report.",
+      href: "/interviews?voiceMode=1",
+    });
+  }
+
+  return {
+    voiceInterviewsCompleted,
+    averageClarityScore: average(
+      feedbackRecords.map((feedback) => feedback.clarityScore),
+    ),
+    averageStructureScore,
+    averageConcisenessScore: average(
+      feedbackRecords.map((feedback) => feedback.concisenessScore),
+    ),
+    averageTechnicalExplanationScore: average(
+      feedbackRecords.map((feedback) => feedback.technicalExplanationScore),
+    ),
+    averageCommunicationScore,
+    commonCommunicationWeakness,
+    bestCommunicationStrength,
+    scoreTrend: feedbackRecords.slice(-8).map((feedback, index) => ({
+      id: feedback.id,
+      title:
+        feedback.interviewSession.title ||
+        `Voice interview ${index + 1}`,
+      date:
+        feedback.interviewSession.completedAt?.toISOString() ??
+        feedback.createdAt.toISOString(),
+      score: communicationScores[index] ?? 0,
+    })),
+    recommendedPractice,
+  };
+}
+
 function getStrongestPatterns(
   patternMetrics: PatternMetric[],
 ): ReadinessPatternSectionItem[] {
@@ -627,16 +844,25 @@ export async function getReadinessReport(
   userProfileId: string,
 ): Promise<ReadinessReport> {
   const scopedUserProfileId = userProfileId.trim();
-  const [patternMetrics, confusions, interviewPerformance, codeExecution] = await Promise.all([
+  const [
+    patternMetrics,
+    confusions,
+    interviewPerformance,
+    codeExecution,
+    voiceCommunication,
+  ] = await Promise.all([
     getPatternMetrics(scopedUserProfileId),
     getPatternConfusions(scopedUserProfileId),
     getInterviewReadinessPerformance(scopedUserProfileId),
     getCodeExecutionMetrics(scopedUserProfileId),
+    getVoiceCommunicationMetrics(scopedUserProfileId),
   ]);
   const scoreBreakdown = calculateReadinessScoreBreakdown(
     patternMetrics,
     confusions,
     getInterviewPerformanceScore(interviewPerformance),
+    getCodeExecutionReadinessScore(codeExecution),
+    getVoiceCommunicationReadinessScore(voiceCommunication),
   );
   const strongestPatterns = getStrongestPatterns(patternMetrics);
   const weakestPatterns = getWeakestPatterns(patternMetrics);
@@ -662,6 +888,7 @@ export async function getReadinessReport(
     patternsNeedingReview,
     interviewPerformance,
     codeExecution,
+    voiceCommunication,
     recommendedNextSevenDays: buildRecommendedNextSevenDays({
       weakestPatterns,
       confusingPatternPairs,

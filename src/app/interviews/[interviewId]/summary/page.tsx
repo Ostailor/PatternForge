@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 
 import ProgressBar from "@/components/ProgressBar";
 import type {
+  CommunicationInsightType,
   InterviewResult,
   InterviewType,
   RubricCategory,
@@ -12,6 +13,11 @@ import { GameEventType as GameEventTypeEnum } from "@/generated/prisma/enums";
 import { buildGameEventKey } from "@/lib/game/events";
 import { getPrisma } from "@/lib/prisma";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
+
+import {
+  createFlashcardFromCommunicationInsightAction,
+  createMistakeFromCommunicationInsightAction,
+} from "./actions";
 
 type InterviewSummaryPageProps = {
   params: Promise<{ interviewId: string }>;
@@ -22,6 +28,9 @@ type InterviewForSummary = NonNullable<
 >;
 type RoundForSummary = InterviewForSummary["rounds"][number];
 type FeedbackForSummary = InterviewForSummary["feedbackRecords"][number];
+type VoiceFeedbackForSummary = InterviewForSummary["voiceFeedbackRecords"][number];
+type CommunicationInsightForSummary =
+  VoiceFeedbackForSummary["communicationInsights"][number];
 
 const rubricCategories: RubricCategory[] = [
   "Communication",
@@ -116,6 +125,31 @@ function truncateText(value: string | null | undefined, fallback: string, limit 
     : normalized;
 }
 
+function formatPhaseLabel(phase: string): string {
+  switch (phase) {
+    case "ClarifyingQuestions":
+      return "Clarifying Questions";
+    case "PatternHypothesis":
+      return "Pattern Hypothesis";
+    default:
+      return phase.replace(/([A-Z])/g, " $1").trim();
+  }
+}
+
+function formatSpokenDuration(durationMs: number | null): string {
+  if (!durationMs || durationMs <= 0) {
+    return "Not tracked";
+  }
+
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return minutes > 0
+    ? `${minutes}m ${seconds.toString().padStart(2, "0")}s`
+    : `${seconds}s`;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -185,6 +219,96 @@ function getRubricImprovement(category: RubricCategory, score: number): string {
   }
 }
 
+function getTotalSpokenDuration(
+  voiceTurns: InterviewForSummary["voiceTurns"],
+): number | null {
+  const durations = voiceTurns
+    .map((turn) => turn.durationMs)
+    .filter((duration): duration is number => typeof duration === "number");
+
+  if (durations.length === 0) {
+    return null;
+  }
+
+  return durations.reduce((total, duration) => total + duration, 0);
+}
+
+function getEvidenceText(insight: CommunicationInsightForSummary): string {
+  const evidence = insight.evidence;
+
+  if (!isRecord(evidence)) {
+    return insight.summary;
+  }
+
+  const quote = evidence.quote;
+  const reason = evidence.reason;
+
+  if (typeof quote === "string" && quote.trim()) {
+    return quote.trim();
+  }
+
+  if (typeof reason === "string" && reason.trim()) {
+    return reason.trim();
+  }
+
+  return insight.summary;
+}
+
+function getInsightByType(
+  insights: CommunicationInsightForSummary[],
+  types: CommunicationInsightType[],
+): CommunicationInsightForSummary | null {
+  return insights.find((insight) => types.includes(insight.insightType)) ?? null;
+}
+
+function getBestExplanation(
+  voiceTurns: InterviewForSummary["voiceTurns"],
+  insights: CommunicationInsightForSummary[],
+): string {
+  const strongInsight = getInsightByType(insights, [
+    "StrongExplanation",
+    "GoodTradeoffDiscussion",
+  ]);
+
+  if (strongInsight) {
+    return getEvidenceText(strongInsight);
+  }
+
+  const candidate = voiceTurns
+    .filter((turn) => turn.speaker === "User")
+    .slice()
+    .sort((left, right) => right.transcript.length - left.transcript.length)[0];
+
+  return truncateText(candidate?.transcript, "No strong spoken explanation detected yet.");
+}
+
+function getVagueAnswerHighlight(
+  insights: CommunicationInsightForSummary[],
+): string {
+  const vagueInsight = getInsightByType(insights, [
+    "UnclearApproach",
+    "TooQuietOrUncertain",
+  ]);
+
+  return vagueInsight
+    ? getEvidenceText(vagueInsight)
+    : "No unclear spoken answer was flagged.";
+}
+
+function getMissingReasoningHighlight(
+  insights: CommunicationInsightForSummary[],
+): string {
+  const missingInsight = getInsightByType(insights, [
+    "MissingInvariant",
+    "WeakTestingExplanation",
+    "WeakComplexityExplanation",
+  ]);
+
+  return missingInsight
+    ? getEvidenceText(missingInsight)
+    : "No missing invariant, edge-case, or complexity gap was flagged.";
+}
+
 function uniqueById<T extends { id: string }>(items: T[]): T[] {
   const seen = new Set<string>();
 
@@ -252,6 +376,11 @@ async function getInterviewForSummary(
               createdAt: "desc",
             },
           },
+          voiceTurns: {
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
         },
         orderBy: {
           roundNumber: "asc",
@@ -265,6 +394,23 @@ async function getInterviewForSummary(
       rubricScores: {
         orderBy: {
           category: "asc",
+        },
+      },
+      voiceTurns: {
+        orderBy: {
+          createdAt: "asc",
+        },
+      },
+      voiceFeedbackRecords: {
+        include: {
+          communicationInsights: {
+            orderBy: {
+              createdAt: "desc",
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
         },
       },
     },
@@ -285,9 +431,21 @@ async function getInterviewXp(userProfileId: string, interviewId: string) {
   );
   const events = await getPrisma().gameEvent.findMany({
     where: {
-      eventKey: {
-        in: eventKeys,
-      },
+      userProfileId,
+      OR: [
+        {
+          eventKey: {
+            in: eventKeys,
+          },
+        },
+        {
+          eventType: GameEventTypeEnum.VoiceInterviewCompleted,
+          metadata: {
+            path: ["interviewId"],
+            equals: interviewId,
+          },
+        },
+      ],
     },
     select: {
       xpAmount: true,
@@ -337,6 +495,10 @@ export default async function InterviewSummaryPage({
     interview.rounds.flatMap((round) => round.attempt?.flashcards ?? []),
   );
   const missedSignals = getMissedSignals(feedback);
+  const voiceFeedback = interview.voiceFeedbackRecords[0] ?? null;
+  const communicationInsights = voiceFeedback?.communicationInsights ?? [];
+  const spokenTurns = interview.voiceTurns.filter((turn) => turn.speaker === "User");
+  const totalSpokenDuration = getTotalSpokenDuration(spokenTurns);
   const weakestCategory = getWeakestRubricCategory(interview.rubricScores);
   const weakestPatternId =
     completedRounds.find((round) => round.selectedPatternId !== round.correctPatternId)
@@ -421,6 +583,15 @@ export default async function InterviewSummaryPage({
           })}
         </div>
       </section>
+
+      <VoiceCommunicationSection
+        interviewId={interview.id}
+        voiceFeedback={voiceFeedback}
+        voiceTurns={spokenTurns}
+        totalSpokenDuration={totalSpokenDuration}
+        communicationInsights={communicationInsights}
+        practicePatternId={weakestPatternId}
+      />
 
       <section className="mt-8">
         <SectionHeader eyebrow="Rounds" title="Round-by-round breakdown" />
@@ -549,6 +720,240 @@ function RubricCard({
       </p>
       <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-bold leading-6 text-slate-700">
         {improvement}
+      </p>
+    </article>
+  );
+}
+
+function VoiceCommunicationSection({
+  interviewId,
+  voiceFeedback,
+  voiceTurns,
+  totalSpokenDuration,
+  communicationInsights,
+  practicePatternId,
+}: {
+  interviewId: string;
+  voiceFeedback: VoiceFeedbackForSummary | null;
+  voiceTurns: InterviewForSummary["voiceTurns"];
+  totalSpokenDuration: number | null;
+  communicationInsights: CommunicationInsightForSummary[];
+  practicePatternId: string | null;
+}) {
+  const voiceModeUsed = voiceTurns.length > 0;
+  const artifactInsight =
+    communicationInsights.find(
+      (insight) =>
+        insight.insightType !== "StrongExplanation" &&
+        insight.insightType !== "GoodTradeoffDiscussion",
+    ) ??
+    communicationInsights[0] ??
+    null;
+
+  return (
+    <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <SectionHeader eyebrow="Voice Mode" title="Voice communication" />
+        <span
+          className={`rounded-md border px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] ${
+            voiceModeUsed
+              ? "border-teal-200 bg-teal-50 text-teal-700"
+              : "border-slate-200 bg-slate-50 text-slate-600"
+          }`}
+        >
+          {voiceModeUsed ? "Voice used" : "Voice not used"}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
+        <StatCard label="Spoken turns" value={String(voiceTurns.length)} />
+        <StatCard
+          label="Spoken time"
+          value={formatSpokenDuration(totalSpokenDuration)}
+        />
+        <StatCard
+          label="Clarity"
+          value={voiceFeedback ? `${voiceFeedback.clarityScore}%` : "No data"}
+        />
+        <StatCard
+          label="Structure"
+          value={voiceFeedback ? `${voiceFeedback.structureScore}%` : "No data"}
+        />
+        <StatCard
+          label="Conciseness"
+          value={voiceFeedback ? `${voiceFeedback.concisenessScore}%` : "No data"}
+        />
+        <StatCard
+          label="Confidence"
+          value={voiceFeedback ? `${voiceFeedback.confidenceScore}%` : "No data"}
+        />
+        <StatCard
+          label="Technical"
+          value={
+            voiceFeedback
+              ? `${voiceFeedback.technicalExplanationScore}%`
+              : "No data"
+          }
+        />
+      </div>
+
+      {voiceFeedback ? (
+        <p className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 text-slate-700">
+          {voiceFeedback.summary}
+        </p>
+      ) : (
+        <p className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-bold leading-6 text-slate-600">
+          Voice communication feedback was not generated for this interview.
+        </p>
+      )}
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-3">
+        <TranscriptHighlight
+          title="Best explanation"
+          value={getBestExplanation(voiceTurns, communicationInsights)}
+        />
+        <TranscriptHighlight
+          title="Vague answer"
+          value={getVagueAnswerHighlight(communicationInsights)}
+        />
+        <TranscriptHighlight
+          title="Missing reasoning"
+          value={getMissingReasoningHighlight(communicationInsights)}
+        />
+      </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-3">
+        <ListPanel
+          title="Communication strengths"
+          items={voiceFeedback?.strengths ?? []}
+        />
+        <ListPanel
+          title="Communication weaknesses"
+          items={voiceFeedback?.weaknesses ?? []}
+        />
+        <ListPanel
+          title="Suggested speaking practice"
+          items={voiceFeedback?.suggestedPractice ?? []}
+        />
+      </div>
+
+      {communicationInsights.length > 0 ? (
+        <div className="mt-5">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+            Communication insights
+          </p>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            {communicationInsights.map((insight) => (
+              <article
+                key={insight.id}
+                className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                      {insight.insightType}
+                    </p>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">
+                      {insight.summary}
+                    </p>
+                  </div>
+                  <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-black text-slate-600">
+                    {insight.severity}
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <CommunicationInsightFormButton
+                    action={createFlashcardFromCommunicationInsightAction}
+                    interviewId={interviewId}
+                    insightId={insight.id}
+                    label="Create flashcard"
+                  />
+                  <CommunicationInsightFormButton
+                    action={createMistakeFromCommunicationInsightAction}
+                    interviewId={interviewId}
+                    insightId={insight.id}
+                    label="Create mistake"
+                  />
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        <ActionLink
+          href={`/interviews/${interviewId}/transcript`}
+          label="Review transcript"
+        />
+        <ActionLink
+          href={practicePatternId ? `/patterns/${practicePatternId}` : "/patterns"}
+          label="Practice explaining this pattern"
+        />
+        <ActionLink href="/interviews?voiceMode=1" label="Start another voice interview" />
+        {artifactInsight ? (
+          <>
+            <CommunicationInsightFormButton
+              action={createFlashcardFromCommunicationInsightAction}
+              interviewId={interviewId}
+              insightId={artifactInsight.id}
+              label="Create flashcard from missed explanation"
+              variant="dark"
+            />
+            <CommunicationInsightFormButton
+              action={createMistakeFromCommunicationInsightAction}
+              interviewId={interviewId}
+              insightId={artifactInsight.id}
+              label="Create mistake from communication insight"
+              variant="dark"
+            />
+          </>
+        ) : null}
+      </div>
+
+      <div id="voice-transcripts" className="mt-6">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+          Transcript review
+        </p>
+        {voiceTurns.length === 0 ? (
+          <p className="mt-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-bold leading-6 text-slate-600">
+            No spoken transcript turns were saved for this interview.
+          </p>
+        ) : (
+          <div className="mt-3 space-y-3">
+            {voiceTurns.map((turn) => (
+              <article
+                key={turn.id}
+                className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                    {formatPhaseLabel(turn.phase)} · {turn.speaker}
+                  </p>
+                  <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-black text-slate-600">
+                    {formatSpokenDuration(turn.durationMs)}
+                  </span>
+                </div>
+                <p className="mt-3 whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-700">
+                  {turn.transcript}
+                </p>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TranscriptHighlight({ title, value }: { title: string; value: string }) {
+  return (
+    <article className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+        {title}
+      </p>
+      <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">
+        {value}
       </p>
     </article>
   );
@@ -699,6 +1104,36 @@ function ActionLink({ href, label }: { href: string; label: string }) {
     >
       {label}
     </Link>
+  );
+}
+
+function CommunicationInsightFormButton({
+  action,
+  interviewId,
+  insightId,
+  label,
+  variant = "light",
+}: {
+  action: (formData: FormData) => void | Promise<void>;
+  interviewId: string;
+  insightId: string;
+  label: string;
+  variant?: "light" | "dark";
+}) {
+  return (
+    <form action={action}>
+      <input type="hidden" name="interviewId" value={interviewId} />
+      <input type="hidden" name="insightId" value={insightId} />
+      <button
+        className={
+          variant === "dark"
+            ? "rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700"
+            : "rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+        }
+      >
+        {label}
+      </button>
+    </form>
   );
 }
 

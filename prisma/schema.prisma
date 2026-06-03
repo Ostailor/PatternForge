@@ -74,6 +74,9 @@ enum GameEventType {
   QuestCompleted
   AchievementEarned
   ContrastDrillCompleted
+  VoiceInterviewCompleted
+  SpeakingDrillCompleted
+  CommunicationInsightCreated
 }
 
 enum RecommendationType {
@@ -92,6 +95,11 @@ enum RecommendationType {
   DebugDrill
   TestingPractice
   ImplementationPractice
+  VoiceInterview
+  SpeakingDrill
+  ExplainPattern
+  ComplexityNarration
+  TestingNarration
 }
 
 enum RecommendationStatus {
@@ -187,6 +195,29 @@ enum InterviewPhase {
   Feedback
 }
 
+enum VoiceSessionStatus {
+  Active
+  Completed
+  Abandoned
+}
+
+enum VoiceSpeaker {
+  User
+  Interviewer
+  System
+}
+
+enum CommunicationInsightType {
+  UnclearApproach
+  MissingInvariant
+  TooVerbose
+  TooQuietOrUncertain
+  StrongExplanation
+  WeakTestingExplanation
+  WeakComplexityExplanation
+  GoodTradeoffDiscussion
+}
+
 enum RubricCategory {
   Communication
   PatternRecognition
@@ -253,6 +284,9 @@ model UserProfile {
   codeRuns               CodeRun[]
   testCases              TestCase[]
   debugInsights          DebugInsight[]
+  voiceSessions          VoiceSession[]
+  voiceFeedbackRecords   VoiceFeedback[]
+  communicationInsights  CommunicationInsight[]
 }
 
 model Pattern {
@@ -757,6 +791,10 @@ model InterviewSession {
   messages                InterviewMessage[]
   feedbackRecords         InterviewFeedback[]
   rubricScores            InterviewRubricScore[]
+  voiceSessions           VoiceSession[]
+  voiceTurns              VoiceTurn[]
+  voiceFeedbackRecords    VoiceFeedback[]
+  communicationInsights   CommunicationInsight[]
 
   @@index([userProfileId])
   @@index([targetPatternId])
@@ -795,6 +833,7 @@ model InterviewRound {
   feedbackRecords    InterviewFeedback[]
   codeSubmissions    CodeSubmission[]
   debugInsights      DebugInsight[]
+  voiceTurns         VoiceTurn[]
 
   @@unique([interviewSessionId, roundNumber])
   @@index([interviewSessionId])
@@ -974,5 +1013,98 @@ model InterviewRubricScore {
 
   @@index([interviewSessionId])
   @@index([category])
+  @@index([createdAt])
+}
+
+model VoiceSession {
+  id                 String             @id @default(cuid())
+  userProfileId      String
+  interviewSessionId String
+  status             VoiceSessionStatus @default(Active)
+  startedAt          DateTime           @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  userProfile        UserProfile        @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  interviewSession   InterviewSession   @relation(fields: [interviewSessionId], references: [id], onDelete: Cascade)
+  turns              VoiceTurn[]
+  feedbackRecords    VoiceFeedback[]
+
+  @@index([userProfileId])
+  @@index([interviewSessionId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model VoiceTurn {
+  id                 String           @id @default(cuid())
+  voiceSessionId     String
+  interviewSessionId String
+  interviewRoundId   String?
+  phase              InterviewPhase
+  speaker            VoiceSpeaker
+  transcript         String           @db.Text
+  audioUrl           String?          @db.Text
+  durationMs         Int?
+  startedAt          DateTime?
+  endedAt            DateTime?
+  createdAt          DateTime         @default(now())
+  voiceSession       VoiceSession     @relation(fields: [voiceSessionId], references: [id], onDelete: Cascade)
+  interviewSession   InterviewSession @relation(fields: [interviewSessionId], references: [id], onDelete: Cascade)
+  interviewRound     InterviewRound?  @relation(fields: [interviewRoundId], references: [id], onDelete: SetNull)
+
+  @@index([voiceSessionId])
+  @@index([interviewSessionId])
+  @@index([interviewRoundId])
+  @@index([phase])
+  @@index([speaker])
+  @@index([createdAt])
+}
+
+model VoiceFeedback {
+  id                        String                 @id @default(cuid())
+  userProfileId             String
+  interviewSessionId        String
+  voiceSessionId            String
+  clarityScore              Int
+  structureScore            Int
+  concisenessScore          Int
+  confidenceScore           Int
+  technicalExplanationScore Int
+  summary                   String                 @db.Text
+  strengths                 String[]               @default([])
+  weaknesses                String[]               @default([])
+  suggestedPractice         String[]               @default([])
+  createdAt                 DateTime               @default(now())
+  userProfile               UserProfile            @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  interviewSession          InterviewSession       @relation(fields: [interviewSessionId], references: [id], onDelete: Cascade)
+  voiceSession              VoiceSession           @relation(fields: [voiceSessionId], references: [id], onDelete: Cascade)
+  communicationInsights     CommunicationInsight[]
+
+  @@index([userProfileId])
+  @@index([interviewSessionId])
+  @@index([voiceSessionId])
+  @@index([createdAt])
+}
+
+model CommunicationInsight {
+  id                 String                   @id @default(cuid())
+  userProfileId      String
+  interviewSessionId String?
+  voiceFeedbackId    String?
+  insightType        CommunicationInsightType
+  severity           InsightSeverity
+  summary            String                   @db.Text
+  evidence           Json                     @default("{}")
+  createdAt          DateTime                 @default(now())
+  userProfile        UserProfile              @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  interviewSession   InterviewSession?        @relation(fields: [interviewSessionId], references: [id], onDelete: SetNull)
+  voiceFeedback      VoiceFeedback?           @relation(fields: [voiceFeedbackId], references: [id], onDelete: SetNull)
+
+  @@index([userProfileId])
+  @@index([interviewSessionId])
+  @@index([voiceFeedbackId])
+  @@index([insightType])
+  @@index([severity])
   @@index([createdAt])
 }

@@ -83,7 +83,8 @@ export type ReadinessScoreBreakdown = {
   retention: number;
   bossBattlePerformance: number;
   interviewPerformance: number;
-  mistakeRecovery: number;
+  codeExecutionDebugging: number;
+  communication: number;
   confidence: number;
 };
 
@@ -154,6 +155,32 @@ export type CodeExecutionMetrics = {
   patternsWithRepeatedFailedTests: CodeExecutionPatternSignal[];
 };
 
+export type VoiceCommunicationTrendPoint = {
+  id: string;
+  title: string;
+  date: string | null;
+  score: number;
+};
+
+export type VoiceCommunicationRecommendation = {
+  title: string;
+  reason: string;
+  href: string;
+};
+
+export type VoiceCommunicationMetrics = {
+  voiceInterviewsCompleted: number;
+  averageClarityScore: number | null;
+  averageStructureScore: number | null;
+  averageConcisenessScore: number | null;
+  averageTechnicalExplanationScore: number | null;
+  averageCommunicationScore: number | null;
+  commonCommunicationWeakness: string | null;
+  bestCommunicationStrength: string | null;
+  scoreTrend: VoiceCommunicationTrendPoint[];
+  recommendedPractice: VoiceCommunicationRecommendation[];
+};
+
 export type ReadinessPatternSectionItem = PatternMetric & {
   reason: string;
 };
@@ -180,4 +207,5 @@ export type ReadinessReport = {
   recommendedNextSevenDays: ReadinessNextSevenDay[];
   interviewPerformance: InterviewReadinessPerformance;
   codeExecution: CodeExecutionMetrics;
+  voiceCommunication: VoiceCommunicationMetrics;
 };

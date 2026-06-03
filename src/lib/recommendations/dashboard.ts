@@ -76,6 +76,13 @@ function getMetadataString(
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function getMetadataBoolean(
+  metadata: Record<string, unknown>,
+  key: string,
+): boolean {
+  return metadata[key] === true;
+}
+
 function getRecommendationTypeLabel(type: RecommendationType): string {
   switch (type) {
     case "DueReview":
@@ -108,6 +115,16 @@ function getRecommendationTypeLabel(type: RecommendationType): string {
       return "Testing Practice";
     case "ImplementationPractice":
       return "Implementation Practice";
+    case "VoiceInterview":
+      return "Voice Interview";
+    case "SpeakingDrill":
+      return "Speaking Drill";
+    case "ExplainPattern":
+      return "Explain Pattern";
+    case "ComplexityNarration":
+      return "Complexity Narration";
+    case "TestingNarration":
+      return "Testing Narration";
   }
 }
 
@@ -145,6 +162,13 @@ function getEstimatedMinutes(
       return 20;
     case "ImplementationPractice":
       return 30;
+    case "VoiceInterview":
+      return 35;
+    case "SpeakingDrill":
+    case "ExplainPattern":
+    case "ComplexityNarration":
+    case "TestingNarration":
+      return 12;
     case "FocusPattern":
     case "RetryProblem":
     case "AIReviewFollowUp":
@@ -162,19 +186,66 @@ function getPrimaryCta(recommendation: SavedRecommendationForDashboard): {
     case "MockInterview": {
       const interviewId = getMetadataString(recommendation.metadata, "interviewId");
       const action = getMetadataString(recommendation.metadata, "action");
+      const voiceMode = getMetadataBoolean(recommendation.metadata, "voiceMode");
+      const speakingDrill = getMetadataBoolean(
+        recommendation.metadata,
+        "speakingDrill",
+      );
+      const focus = getMetadataString(recommendation.metadata, "focus");
+      const speakingDrillHref =
+        focus === "testing"
+          ? "/drills/speaking?type=debugging"
+          : focus === "approach"
+            ? "/drills/speaking?type=approach"
+            : "/drills/speaking";
+      const voiceHref = focus
+        ? `/interviews?voiceMode=1&focus=${encodeURIComponent(focus)}`
+        : "/interviews?voiceMode=1";
 
       return {
-        label: action === "resume" && interviewId ? "Resume Interview" : "Start Mock Interview",
+        label:
+          action === "resume" && interviewId
+            ? "Resume Interview"
+            : speakingDrill
+              ? "Start Speaking Drill"
+            : voiceMode
+              ? "Start Voice Interview"
+              : "Start Mock Interview",
         href:
           action === "resume" && interviewId
             ? `/interviews/${interviewId}`
-            : "/interviews",
+            : speakingDrill
+              ? speakingDrillHref
+            : voiceMode
+              ? voiceHref
+              : "/interviews",
       };
     }
     case "FocusedInterview":
       return { label: "Start Focused Interview", href: "/interviews" };
     case "WeaknessRepairInterview":
       return { label: "Start Weakness Repair Interview", href: "/interviews" };
+    case "VoiceInterview":
+      return { label: "Start Voice Interview", href: "/interviews?voiceMode=1" };
+    case "SpeakingDrill":
+      return { label: "Start Speaking Drill", href: "/drills/speaking" };
+    case "ExplainPattern":
+      return {
+        label: "Explain Pattern",
+        href: recommendation.targetPatternId
+          ? `/drills/speaking?type=pattern&patternId=${recommendation.targetPatternId}`
+          : "/drills/speaking?type=pattern",
+      };
+    case "ComplexityNarration":
+      return {
+        label: "Practice Complexity",
+        href: "/drills/speaking?type=complexity",
+      };
+    case "TestingNarration":
+      return {
+        label: "Practice Testing Narration",
+        href: "/drills/speaking?type=debugging",
+      };
     case "ContrastDrill":
       return {
         label: "Start Contrast Drill",
@@ -270,6 +341,7 @@ function getSecondaryCta(
 
   if (
     recommendation.recommendationType === "MockInterview" ||
+    recommendation.recommendationType === "VoiceInterview" ||
     recommendation.recommendationType === "FocusedInterview" ||
     recommendation.recommendationType === "WeaknessRepairInterview"
   ) {
@@ -283,6 +355,18 @@ function getSecondaryCta(
     return {
       label: "View Pattern",
       href: `/patterns/${recommendation.targetPatternId}`,
+    };
+  }
+
+  if (
+    recommendation.recommendationType === "SpeakingDrill" ||
+    recommendation.recommendationType === "ExplainPattern" ||
+    recommendation.recommendationType === "ComplexityNarration" ||
+    recommendation.recommendationType === "TestingNarration"
+  ) {
+    return {
+      label: "All Speaking Drills",
+      href: "/drills/speaking",
     };
   }
 

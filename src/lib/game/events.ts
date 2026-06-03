@@ -22,12 +22,18 @@ const gameEventTypes = [
   GameEventType.QuestCompleted,
   GameEventType.AchievementEarned,
   GameEventType.ContrastDrillCompleted,
+  GameEventType.VoiceInterviewCompleted,
+  GameEventType.SpeakingDrillCompleted,
+  GameEventType.CommunicationInsightCreated,
 ] as const;
 
 const sourceMetadataKeys = [
   ["attemptId", "attempt"],
   ["reviewLogId", "reviewLog"],
   ["battleId", "battle"],
+  ["voiceSessionId", "voiceSession"],
+  ["speakingDrillId", "speakingDrill"],
+  ["communicationInsightId", "communicationInsight"],
   ["interviewId", "interview"],
   ["questId", "quest"],
   ["achievementId", "achievement"],
@@ -48,6 +54,9 @@ function createEmptyBreakdown(): XPBreakdown {
     QuestCompleted: 0,
     AchievementEarned: 0,
     ContrastDrillCompleted: 0,
+    VoiceInterviewCompleted: 0,
+    SpeakingDrillCompleted: 0,
+    CommunicationInsightCreated: 0,
     total: 0,
   };
 }

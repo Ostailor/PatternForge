@@ -126,6 +126,10 @@ function getEventTone(eventType: string): string {
     case "InterviewStrongResult":
     case "InterviewImprovement":
       return "border-sky-200 bg-sky-50 text-sky-700";
+    case "VoiceInterviewCompleted":
+    case "SpeakingDrillCompleted":
+    case "CommunicationInsightCreated":
+      return "border-violet-200 bg-violet-50 text-violet-700";
     case "QuestCompleted":
       return "border-amber-200 bg-amber-50 text-amber-700";
     default:
@@ -897,19 +901,20 @@ function RecentGameEventsPanel({
         </span>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      <div className="mt-5 grid gap-3 sm:grid-cols-4">
         <MiniStat
           label="Achievements"
           value={data?.achievementsEarned ?? 0}
         />
         <MiniStat label="Battles" value={data?.battlesCompleted ?? 0} />
         <MiniStat label="Quests" value={data?.questsCompleted ?? 0} />
+        <MiniStat label="Voice" value={data?.voiceEvents ?? 0} />
       </div>
 
       {events.length === 0 ? (
         <p className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-bold text-slate-600">
           New XP events will appear here as you complete attempts, reviews,
-          quests, battles, and achievements.
+          voice practice, quests, battles, and achievements.
         </p>
       ) : (
         <div className="mt-5 divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200">

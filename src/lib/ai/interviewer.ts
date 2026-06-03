@@ -176,11 +176,108 @@ function userAskedForHint(userInput: string): boolean {
   );
 }
 
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function isVagueOrIncompleteTranscript(text: string): boolean {
+  const normalized = text.toLowerCase();
+
+  return (
+    wordCount(text) < 12 ||
+    normalized.includes("something") ||
+    normalized.includes("stuff") ||
+    normalized.includes("basically just") ||
+    normalized.includes("you know") ||
+    normalized.includes("[inaudible]") ||
+    normalized.includes("inaudible")
+  );
+}
+
+function isRamblyTranscript(text: string): boolean {
+  return wordCount(text) > 180;
+}
+
+function jumpsToCodeBeforePlan(input: AIInterviewerInput): boolean {
+  if (input.currentPhase !== "Approach") {
+    return false;
+  }
+
+  const normalized = input.userInput.toLowerCase();
+
+  return (
+    !input.currentPhaseData.approachText &&
+    (normalized.includes("for ") ||
+      normalized.includes("while ") ||
+      normalized.includes("return ") ||
+      normalized.includes("def ") ||
+      normalized.includes("class ") ||
+      normalized.includes("code"))
+  );
+}
+
+function statesPatternWithoutJustification(input: AIInterviewerInput): boolean {
+  if (input.currentPhase !== "PatternHypothesis") {
+    return false;
+  }
+
+  const explanation = input.userInput.toLowerCase();
+
+  return (
+    wordCount(explanation) < 35 ||
+    (!explanation.includes("because") &&
+      !explanation.includes("constraint") &&
+      !explanation.includes("signal") &&
+      !explanation.includes("invariant") &&
+      !explanation.includes("why"))
+  );
+}
+
 export function buildFallbackInterviewerResponse(
   input: AIInterviewerInput,
 ): AIInterviewerOutput {
   const hintRequested = userAskedForHint(input.userInput);
   const canRevealPattern = input.canRevealCorrectPattern;
+
+  if (input.userInputWasSpoken && isVagueOrIncompleteTranscript(input.userInput)) {
+    return {
+      interviewerMessage:
+        "I am going to treat the transcript as incomplete rather than infer what you meant. Can you restate the key reasoning more concretely: what assumption, signal, or next step are you relying on?",
+      phaseSuggestion: null,
+      hintLevel: null,
+      concernFlags: ["unclear_voice_transcript"],
+    };
+  }
+
+  if (input.userInputWasSpoken && isRamblyTranscript(input.userInput)) {
+    return {
+      interviewerMessage:
+        "That answer has a lot of detail. Summarize your approach in 2-3 sentences, then call out the invariant or edge case you think matters most.",
+      phaseSuggestion: null,
+      hintLevel: null,
+      concernFlags: ["rambling_voice_answer"],
+    };
+  }
+
+  if (input.userInputWasSpoken && jumpsToCodeBeforePlan(input)) {
+    return {
+      interviewerMessage:
+        "Before we go into code, give me the high-level plan first: what state are you maintaining, what invariant should stay true, and what operation advances the solution?",
+      phaseSuggestion: null,
+      hintLevel: null,
+      concernFlags: ["jumped_to_code_before_plan"],
+    };
+  }
+
+  if (input.userInputWasSpoken && statesPatternWithoutJustification(input)) {
+    return {
+      interviewerMessage:
+        "You stated a pattern, but I need the justification. What signal in the constraints or data shape makes that pattern fit, and what alternative are you ruling out?",
+      phaseSuggestion: null,
+      hintLevel: hintRequested ? 1 : null,
+      concernFlags: ["pattern_without_justification"],
+    };
+  }
 
   switch (input.currentPhase) {
     case "Setup":

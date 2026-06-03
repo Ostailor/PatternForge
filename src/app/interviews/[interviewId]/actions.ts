@@ -8,10 +8,13 @@ import { GameEventType } from "@/generated/prisma/enums";
 import type { InterviewPhase, RubricCategory } from "@/generated/prisma/enums";
 import { patterns } from "@/data/patterns";
 import { requestAIInterviewerResponse } from "@/lib/ai/interviewer";
+import { scoreCommunication } from "@/lib/ai/scoreCommunication";
 import { scoreInterview } from "@/lib/ai/scoreInterview";
 import type { ScoreInterviewCodeExecution } from "@/lib/ai/scoreInterview";
 import type {
+  AIInterviewCodeExecutionInput,
   AIInterviewMessageInput,
+  AIInterviewVoiceTurnInput,
   AIInterviewerInput,
 } from "@/lib/ai/types";
 import { checkAchievementsWithClient } from "@/lib/achievements/service";
@@ -24,6 +27,12 @@ import {
 } from "@/lib/progress-db";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 import type { Confidence, SolvedStatus } from "@/lib/types";
+import { transcribeInterviewTurn } from "@/lib/voice/transcription";
+import {
+  MAX_RECORDING_DURATION_MS,
+  MAX_TRANSCRIPT_LENGTH,
+  isTranscriptLengthAllowed,
+} from "@/lib/voice/voiceLimits";
 
 type RoundForScoring = {
   roundNumber: number;
@@ -50,6 +59,13 @@ type RoundForScoring = {
   codeText: string | null;
   testCasesText: string | null;
   complexityText: string | null;
+  voiceTurns?: {
+    phase: InterviewPhase;
+    speaker: "User" | "Interviewer" | "System";
+    transcript: string;
+    durationMs: number | null;
+    createdAt: Date;
+  }[];
   debugInsights?: {
     id: string;
   }[];
@@ -82,12 +98,20 @@ type InterviewForFinalization = {
   id: string;
   userProfileId: string;
   interviewType: AIInterviewerInput["interviewType"];
+  title: string;
   startedAt: Date;
   durationMinutes: number;
   messages: {
     role: "User" | "Interviewer" | "System";
     phase: InterviewPhase;
     content: string;
+  }[];
+  voiceTurns: {
+    phase: InterviewPhase;
+    speaker: "User" | "Interviewer" | "System";
+    transcript: string;
+    durationMs: number | null;
+    createdAt: Date;
   }[];
   rounds: RoundForScoring[];
 };
@@ -102,10 +126,84 @@ const RUBRIC_CATEGORIES: RubricCategory[] = [
   "TimeManagement",
 ];
 
+const VOICE_REWARD_MAJOR_PHASES: InterviewPhase[] = [
+  "ClarifyingQuestions",
+  "PatternHypothesis",
+  "Approach",
+  "Testing",
+  "Complexity",
+];
+
+const interviewRoundAIInclude = {
+  selectedPattern: true,
+  correctPattern: true,
+  problem: {
+    include: {
+      problemPatterns: {
+        include: {
+          pattern: true,
+        },
+      },
+    },
+  },
+  messages: true,
+  voiceTurns: {
+    orderBy: {
+      createdAt: "asc" as const,
+    },
+  },
+  debugInsights: {
+    select: {
+      id: true,
+    },
+  },
+  codeSubmissions: {
+    include: {
+      codeRuns: {
+        orderBy: {
+          createdAt: "asc" as const,
+        },
+        include: {
+          testResults: {
+            orderBy: {
+              createdAt: "asc" as const,
+            },
+            include: {
+              testCase: {
+                select: {
+                  source: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+export type InterviewVoiceTranscriptionResult =
+  | {
+      status: "success";
+      transcript: string;
+      confidence?: number;
+      durationMs?: number;
+    }
+  | {
+      status: "fallback";
+      message: string;
+    };
+
 function readString(formData: FormData, key: string): string {
   const value = formData.get(key);
 
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readFile(formData: FormData, key: string): File | null {
+  const value = formData.get(key);
+
+  return value instanceof File && value.size > 0 ? value : null;
 }
 
 function readPhase(formData: FormData): InterviewPhase | null {
@@ -160,12 +258,127 @@ function readPositiveInt(
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+function clampCommunicationScore(score: number): number {
+  if (!Number.isFinite(score)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.min(100, Math.round(score)));
+}
+
 function requireText(value: string, message: string): string {
   if (!value.trim()) {
     throw new Error(message);
   }
 
   return value.trim();
+}
+
+function readOptionalDate(formData: FormData, key: string): Date | undefined {
+  const value = readString(formData, key);
+
+  if (!value) {
+    return undefined;
+  }
+
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function readVoiceDurationMs(formData: FormData): number | undefined {
+  const durationMs = readPositiveInt(formData, "voiceDurationMs", 0);
+
+  if (durationMs <= 0) {
+    return undefined;
+  }
+
+  return Math.min(durationMs, MAX_RECORDING_DURATION_MS);
+}
+
+function hasAcceptedVoiceTranscript(formData: FormData): boolean {
+  return readString(formData, "voiceTranscriptAccepted") === "true";
+}
+
+async function getOrCreateActiveVoiceSession({
+  tx,
+  userProfileId,
+  interviewSessionId,
+}: {
+  tx: Prisma.TransactionClient;
+  userProfileId: string;
+  interviewSessionId: string;
+}) {
+  const existingSession = await tx.voiceSession.findFirst({
+    where: {
+      userProfileId,
+      interviewSessionId,
+      status: "Active",
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  if (existingSession) {
+    return existingSession;
+  }
+
+  return tx.voiceSession.create({
+    data: {
+      userProfileId,
+      interviewSessionId,
+      status: "Active",
+    },
+  });
+}
+
+async function saveVoiceTurnIfAccepted({
+  tx,
+  formData,
+  userProfileId,
+  interviewSessionId,
+  interviewRoundId,
+  phase,
+  transcript,
+}: {
+  tx: Prisma.TransactionClient;
+  formData: FormData;
+  userProfileId: string;
+  interviewSessionId: string;
+  interviewRoundId: string;
+  phase: InterviewPhase;
+  transcript: string;
+}) {
+  if (!hasAcceptedVoiceTranscript(formData)) {
+    return;
+  }
+
+  const normalizedTranscript = transcript.trim();
+
+  if (!normalizedTranscript || !isTranscriptLengthAllowed(normalizedTranscript)) {
+    return;
+  }
+
+  const voiceSession = await getOrCreateActiveVoiceSession({
+    tx,
+    userProfileId,
+    interviewSessionId,
+  });
+
+  await tx.voiceTurn.create({
+    data: {
+      voiceSessionId: voiceSession.id,
+      interviewSessionId,
+      interviewRoundId,
+      phase,
+      speaker: "User",
+      transcript: normalizedTranscript,
+      durationMs: readVoiceDurationMs(formData),
+      startedAt: readOptionalDate(formData, "voiceStartedAt"),
+      endedAt: readOptionalDate(formData, "voiceEndedAt"),
+    },
+  });
 }
 
 async function hasInterviewRoundCodeSubmission({
@@ -221,6 +434,197 @@ async function hasInterviewRoundCodeRun({
   return Boolean(run);
 }
 
+export async function transcribeInterviewVoiceTurnAction(
+  formData: FormData,
+): Promise<InterviewVoiceTranscriptionResult> {
+  const userProfile = await ensureCurrentUserProfile();
+
+  if (!userProfile) {
+    return {
+      status: "fallback",
+      message: "Sign in to use Voice Mode, or type your answer manually.",
+    };
+  }
+
+  const interviewId = readString(formData, "interviewId");
+  const roundId = readString(formData, "roundId");
+  const phase = readPhase(formData);
+  const audioFile = readFile(formData, "audio");
+
+  if (!interviewId || !roundId || !phase || !audioFile) {
+    return {
+      status: "fallback",
+      message: "Voice input could not be read. Type your answer manually.",
+    };
+  }
+
+  const interview = await getPrisma().interviewSession.findFirst({
+    where: {
+      id: interviewId,
+      userProfileId: userProfile.id,
+      status: "Active",
+      rounds: {
+        some: {
+          id: roundId,
+          interviewSessionId: interviewId,
+        },
+      },
+    },
+    select: {
+      id: true,
+      rounds: {
+        where: {
+          id: roundId,
+        },
+        select: {
+          id: true,
+          status: true,
+        },
+      },
+    },
+  });
+
+  const round = interview?.rounds[0];
+
+  if (!interview || !round || round.status === "Completed" || round.status === "Skipped") {
+    return {
+      status: "fallback",
+      message: "This interview phase is no longer available for voice input.",
+    };
+  }
+
+  const result = await transcribeInterviewTurn({
+    audioBlob: audioFile,
+    durationMs: readVoiceDurationMs(formData),
+    phase,
+    interviewSessionId: interview.id,
+    interviewRoundId: round.id,
+  });
+
+  if (result.status === "fallback") {
+    return {
+      status: "fallback",
+      message: result.message,
+    };
+  }
+
+  return {
+    status: "success",
+    transcript: result.output.transcript.slice(0, MAX_TRANSCRIPT_LENGTH),
+    confidence: result.output.confidence,
+    durationMs: result.output.durationMs,
+  };
+}
+
+export async function abandonVoiceSessionAction(formData: FormData) {
+  const userProfile = await ensureCurrentUserProfile();
+
+  if (!userProfile) {
+    redirect("/interviews?error=signin");
+  }
+
+  const interviewId = readString(formData, "interviewId");
+
+  if (!interviewId) {
+    redirect("/interviews");
+  }
+
+  await getPrisma().voiceSession.updateMany({
+    where: {
+      userProfileId: userProfile.id,
+      interviewSessionId: interviewId,
+      status: "Active",
+      interviewSession: {
+        userProfileId: userProfile.id,
+      },
+    },
+    data: {
+      status: "Abandoned",
+      completedAt: new Date(),
+    },
+  });
+
+  revalidatePath(`/interviews/${interviewId}`);
+  revalidatePath(`/interviews/${interviewId}/summary`);
+  revalidatePath(`/interviews/${interviewId}/transcript`);
+  redirect(`/interviews/${interviewId}?voice=abandoned`);
+}
+
+export async function deleteVoiceTranscriptsAction(formData: FormData) {
+  const userProfile = await ensureCurrentUserProfile();
+
+  if (!userProfile) {
+    redirect("/interviews?error=signin");
+  }
+
+  const interviewId = readString(formData, "interviewId");
+
+  if (!interviewId) {
+    redirect("/interviews");
+  }
+
+  await getPrisma().$transaction(async (tx) => {
+    const interview = await tx.interviewSession.findFirst({
+      where: {
+        id: interviewId,
+        userProfileId: userProfile.id,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!interview) {
+      return;
+    }
+
+    await tx.communicationInsight.deleteMany({
+      where: {
+        userProfileId: userProfile.id,
+        interviewSessionId: interview.id,
+      },
+    });
+    await tx.voiceFeedback.deleteMany({
+      where: {
+        userProfileId: userProfile.id,
+        interviewSessionId: interview.id,
+      },
+    });
+    await tx.voiceTurn.deleteMany({
+      where: {
+        interviewSessionId: interview.id,
+        interviewSession: {
+          userProfileId: userProfile.id,
+        },
+      },
+    });
+    await tx.voiceSession.updateMany({
+      where: {
+        userProfileId: userProfile.id,
+        interviewSessionId: interview.id,
+      },
+      data: {
+        status: "Abandoned",
+        completedAt: new Date(),
+      },
+    });
+    await tx.interviewSession.update({
+      where: {
+        id: interview.id,
+      },
+      data: {
+        communicationScore: null,
+      },
+    });
+  });
+
+  revalidatePath(`/interviews/${interviewId}`);
+  revalidatePath(`/interviews/${interviewId}/summary`);
+  revalidatePath(`/interviews/${interviewId}/transcript`);
+  revalidatePath("/readiness");
+  redirect(`/interviews/${interviewId}/transcript?voiceAction=deleted`);
+}
+
 function getPatternName(patternId: string | null): string {
   return patterns.find((pattern) => pattern.id === patternId)?.name ?? "Unknown";
 }
@@ -256,6 +660,91 @@ function uniqueMessages(
     seen.add(key);
     return [toAIMessageInput(message)];
   });
+}
+
+function toAIVoiceTurnInput(voiceTurn: {
+  phase: InterviewPhase;
+  speaker: "User" | "Interviewer" | "System";
+  transcript: string;
+  durationMs?: number | null;
+  createdAt?: Date | null;
+}): AIInterviewVoiceTurnInput {
+  return {
+    phase: voiceTurn.phase,
+    speaker: voiceTurn.speaker,
+    transcript: voiceTurn.transcript,
+    durationMs: voiceTurn.durationMs ?? null,
+    createdAt: voiceTurn.createdAt?.toISOString() ?? null,
+  };
+}
+
+function toAICodeExecutionInput(
+  codeExecution: ReturnType<typeof buildRoundCodeExecution>,
+): AIInterviewCodeExecutionInput | null {
+  return codeExecution;
+}
+
+function getVoiceTurnsForAI({
+  interview,
+  round,
+  phase,
+  currentTranscript,
+  currentTranscriptWasSpoken,
+}: {
+  interview: {
+    voiceTurns?: {
+      phase: InterviewPhase;
+      speaker: "User" | "Interviewer" | "System";
+      transcript: string;
+      durationMs: number | null;
+      createdAt: Date;
+    }[];
+  };
+  round: RoundForScoring;
+  phase: InterviewPhase;
+  currentTranscript: string;
+  currentTranscriptWasSpoken: boolean;
+}): {
+  previousVoiceTurns: AIInterviewVoiceTurnInput[];
+  currentPhaseVoiceTurns: AIInterviewVoiceTurnInput[];
+} {
+  const savedVoiceTurns = [...(interview.voiceTurns ?? []), ...(round.voiceTurns ?? [])];
+  const seen = new Set<string>();
+  const uniqueVoiceTurns = savedVoiceTurns.flatMap((voiceTurn) => {
+    const key = [
+      voiceTurn.phase,
+      voiceTurn.speaker,
+      voiceTurn.createdAt.getTime(),
+      voiceTurn.transcript,
+    ].join(":");
+
+    if (seen.has(key)) {
+      return [];
+    }
+
+    seen.add(key);
+    return [toAIVoiceTurnInput(voiceTurn)];
+  });
+  const currentVoiceTurn =
+    currentTranscriptWasSpoken && currentTranscript.trim()
+      ? [
+          {
+            phase,
+            speaker: "User" as const,
+            transcript: currentTranscript.trim(),
+            durationMs: null,
+            createdAt: new Date().toISOString(),
+          },
+        ]
+      : [];
+
+  return {
+    previousVoiceTurns: uniqueVoiceTurns,
+    currentPhaseVoiceTurns: [
+      ...uniqueVoiceTurns.filter((voiceTurn) => voiceTurn.phase === phase),
+      ...currentVoiceTurn,
+    ],
+  };
 }
 
 function getSecondaryPatternNames(round: RoundForScoring): string[] {
@@ -351,17 +840,42 @@ function buildAIInterviewerInput({
   round,
   phase,
   userInput,
+  userInputWasSpoken,
 }: {
   interview: {
     interviewType: AIInterviewerInput["interviewType"];
     messages: { role: "User" | "Interviewer" | "System"; phase: InterviewPhase; content: string }[];
+    voiceTurns?: {
+      phase: InterviewPhase;
+      speaker: "User" | "Interviewer" | "System";
+      transcript: string;
+      durationMs: number | null;
+      createdAt: Date;
+    }[];
   };
   round: RoundForScoring & {
     messages?: { role: "User" | "Interviewer" | "System"; phase: InterviewPhase; content: string }[];
   };
   phase: InterviewPhase;
   userInput: string;
+  userInputWasSpoken?: boolean;
 }): AIInterviewerInput {
+  const spokenInput =
+    userInputWasSpoken ??
+    Boolean(round.voiceTurns?.some(
+      (voiceTurn) =>
+        voiceTurn.phase === phase &&
+        voiceTurn.speaker === "User" &&
+        voiceTurn.transcript.trim() === userInput.trim(),
+    ));
+  const voiceTurns = getVoiceTurnsForAI({
+    interview,
+    round,
+    phase,
+    currentTranscript: userInput,
+    currentTranscriptWasSpoken: spokenInput,
+  });
+
   return {
     interviewType: interview.interviewType,
     currentPhase: phase,
@@ -377,7 +891,11 @@ function buildAIInterviewerInput({
         ...(round.messages ?? []),
       ]),
     ],
+    previousVoiceTurns: voiceTurns.previousVoiceTurns,
+    currentPhaseVoiceTurns: voiceTurns.currentPhaseVoiceTurns,
     userInput,
+    userInputWasSpoken: spokenInput,
+    codeExecution: toAICodeExecutionInput(buildRoundCodeExecution(round)),
     currentPhaseData: {
       selectedPatternName: round.selectedPattern?.name ?? null,
       patternExplanation: round.patternExplanation,
@@ -389,6 +907,102 @@ function buildAIInterviewerInput({
     canRevealCorrectPattern:
       phase === "Feedback" ||
       Boolean(round.selectedPatternId && round.patternExplanation),
+  };
+}
+
+function getRoundPhasesWithEvidence(round: RoundForScoring): InterviewPhase[] {
+  return [
+    round.patternExplanation ? "PatternHypothesis" : null,
+    round.approachText ? "Approach" : null,
+    round.codeText ? "Implementation" : null,
+    round.testCasesText ? "Testing" : null,
+    round.complexityText ? "Complexity" : null,
+  ].filter((phase): phase is InterviewPhase => Boolean(phase));
+}
+
+function buildScoreCommunicationInput({
+  interview,
+  completedAt,
+  finalFeedback,
+}: {
+  interview: InterviewForFinalization;
+  completedAt: Date;
+  finalFeedback: {
+    summary: string;
+    strengths: string[];
+    weaknesses: string[];
+    followUpRecommendations: string[];
+  };
+}) {
+  return {
+    interviewSessionId: interview.id,
+    interviewTitle: interview.title,
+    interviewType: interview.interviewType,
+    durationMinutes: interview.durationMinutes,
+    startedAt: interview.startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    rounds: interview.rounds.map((round) => ({
+      roundNumber: round.roundNumber,
+      problemTitle: round.problem?.title ?? "PatternForge problem",
+      difficulty: round.problem?.difficulty ?? "Medium",
+      phases: getRoundPhasesWithEvidence(round),
+      patternExplanation: round.patternExplanation,
+      approachText: round.approachText,
+      testCasesText: round.testCasesText,
+      complexityText: round.complexityText,
+      codeExecution: buildRoundCodeExecution(round),
+    })),
+    voiceTurns: interview.voiceTurns.map((voiceTurn) => ({
+      phase: voiceTurn.phase,
+      speaker: voiceTurn.speaker,
+      transcript: voiceTurn.transcript,
+      durationMs: voiceTurn.durationMs,
+      createdAt: voiceTurn.createdAt.toISOString(),
+    })),
+    messages: interview.messages.map(toAIMessageInput),
+    finalFeedback,
+  };
+}
+
+function getUserVoiceTurns(interview: InterviewForFinalization) {
+  return interview.voiceTurns.filter(
+    (voiceTurn) => voiceTurn.speaker === "User" && voiceTurn.transcript.trim(),
+  );
+}
+
+function usedVoiceInAllMajorInterviewPhases(
+  interview: InterviewForFinalization,
+): boolean {
+  const spokenPhases = new Set(
+    getUserVoiceTurns(interview).map((voiceTurn) => voiceTurn.phase),
+  );
+
+  return VOICE_REWARD_MAJOR_PHASES.every((phase) => spokenPhases.has(phase));
+}
+
+function calculateVoiceInterviewXp({
+  communicationScore,
+  usedAllMajorPhases,
+}: {
+  communicationScore: {
+    clarityScore: number;
+    structureScore: number;
+    technicalExplanationScore: number;
+  };
+  usedAllMajorPhases: boolean;
+}) {
+  const breakdown = {
+    completed: 30,
+    clarityBonus: communicationScore.clarityScore >= 80 ? 20 : 0,
+    structureBonus: communicationScore.structureScore >= 80 ? 20 : 0,
+    technicalExplanationBonus:
+      communicationScore.technicalExplanationScore >= 80 ? 20 : 0,
+    allMajorPhasesBonus: usedAllMajorPhases ? 10 : 0,
+  };
+
+  return {
+    total: Object.values(breakdown).reduce((total, value) => total + value, 0),
+    breakdown,
   };
 }
 
@@ -469,12 +1083,28 @@ async function finalizeInterview({
       interviewSessionId: interview.id,
     },
   });
+  await tx.communicationInsight.deleteMany({
+    where: {
+      interviewSessionId: interview.id,
+    },
+  });
+  await tx.voiceFeedback.deleteMany({
+    where: {
+      interviewSessionId: interview.id,
+    },
+  });
+  const finalFeedback = {
+    summary: score.summary,
+    strengths: score.strengths,
+    weaknesses: score.weaknesses,
+    followUpRecommendations: score.followUpRecommendations,
+  };
   await tx.interviewFeedback.create({
     data: {
       interviewSessionId: interview.id,
-      summary: score.summary,
-      strengths: score.strengths,
-      weaknesses: score.weaknesses,
+      summary: finalFeedback.summary,
+      strengths: finalFeedback.strengths,
+      weaknesses: finalFeedback.weaknesses,
       rubric: {
         scores: {
           Communication: score.Communication,
@@ -489,9 +1119,113 @@ async function finalizeInterview({
         suggestedMistakes: score.suggestedMistakes,
         suggestedFlashcards: score.suggestedFlashcards,
       },
-      followUpRecommendations: score.followUpRecommendations,
+      followUpRecommendations: finalFeedback.followUpRecommendations,
     },
   });
+  const communicationScore = await scoreCommunication(
+    buildScoreCommunicationInput({
+      interview,
+      completedAt,
+      finalFeedback,
+    }),
+  );
+  const communicationOverallScore = Math.max(
+    1,
+    clampCommunicationScore(
+      (communicationScore.clarityScore +
+        communicationScore.structureScore +
+        communicationScore.concisenessScore +
+        communicationScore.confidenceScore +
+        communicationScore.technicalExplanationScore) /
+        5,
+    ),
+  );
+  const userVoiceTurns = getUserVoiceTurns(interview);
+
+  if (userVoiceTurns.length > 0) {
+    const voiceSession = await getOrCreateActiveVoiceSession({
+      tx,
+      userProfileId: interview.userProfileId,
+      interviewSessionId: interview.id,
+    });
+    const voiceFeedback = await tx.voiceFeedback.create({
+      data: {
+        userProfileId: interview.userProfileId,
+        interviewSessionId: interview.id,
+        voiceSessionId: voiceSession.id,
+        clarityScore: communicationScore.clarityScore,
+        structureScore: communicationScore.structureScore,
+        concisenessScore: communicationScore.concisenessScore,
+        confidenceScore: communicationScore.confidenceScore,
+        technicalExplanationScore: communicationScore.technicalExplanationScore,
+        summary: communicationScore.summary,
+        strengths: communicationScore.strengths,
+        weaknesses: communicationScore.weaknesses,
+        suggestedPractice: communicationScore.suggestedPractice,
+      },
+    });
+    for (const insight of communicationScore.communicationInsights) {
+      const communicationInsight = await tx.communicationInsight.create({
+        data: {
+          userProfileId: interview.userProfileId,
+          interviewSessionId: interview.id,
+          voiceFeedbackId: voiceFeedback.id,
+          insightType: insight.insightType,
+          severity: insight.severity,
+          summary: insight.summary,
+          evidence: insight.evidence as Prisma.InputJsonObject,
+        },
+      });
+
+      await createGameEventWithClient(
+        tx,
+        interview.userProfileId,
+        GameEventType.CommunicationInsightCreated,
+        0,
+        "Communication insight created",
+        {
+          communicationInsightId: communicationInsight.id,
+          interviewId: interview.id,
+          voiceFeedbackId: voiceFeedback.id,
+          insightType: insight.insightType,
+          severity: insight.severity,
+        },
+      );
+    }
+    await tx.voiceSession.update({
+      where: {
+        id: voiceSession.id,
+      },
+      data: {
+        status: "Completed",
+        completedAt,
+      },
+    });
+    const usedAllMajorPhases = usedVoiceInAllMajorInterviewPhases(interview);
+    const voiceRewards = calculateVoiceInterviewXp({
+      communicationScore,
+      usedAllMajorPhases,
+    });
+
+    await createGameEventWithClient(
+      tx,
+      interview.userProfileId,
+      GameEventType.VoiceInterviewCompleted,
+      voiceRewards.total,
+      "Voice interview completed",
+      {
+        voiceSessionId: voiceSession.id,
+        interviewId: interview.id,
+        interviewType: interview.interviewType,
+        spokenTurnCount: userVoiceTurns.length,
+        usedAllMajorPhases,
+        clarityScore: communicationScore.clarityScore,
+        structureScore: communicationScore.structureScore,
+        technicalExplanationScore: communicationScore.technicalExplanationScore,
+        xpBreakdown: voiceRewards.breakdown,
+      },
+    );
+  }
   await tx.interviewRubricScore.createMany({
     data: RUBRIC_CATEGORIES.map((category) => ({
       interviewSessionId: interview.id,
@@ -576,7 +1310,7 @@ async function finalizeInterview({
       status: "Completed",
       completedAt,
       overallScore: score.overallScore,
-      communicationScore: score.Communication,
+      communicationScore: communicationOverallScore,
       patternRecognitionScore: score.PatternRecognition,
       problemSolvingScore: score.ProblemSolving,
       implementationScore: score.Implementation,
@@ -670,25 +1404,17 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         },
         include: {
           rounds: {
-            include: {
-              selectedPattern: true,
-              correctPattern: true,
-              problem: {
-                include: {
-                  problemPatterns: {
-                    include: {
-                      pattern: true,
-                    },
-                  },
-                },
-              },
-              messages: true,
-            },
+            include: interviewRoundAIInclude,
             orderBy: {
               roundNumber: "asc",
             },
           },
           messages: true,
+          voiceTurns: {
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
         },
       });
 
@@ -727,6 +1453,7 @@ export async function saveInterviewPhaseAction(formData: FormData) {
             round: nextRoundState,
             phase: activePhase,
             userInput,
+            userInputWasSpoken: hasAcceptedVoiceTranscript(formData),
           }),
         );
 
@@ -753,6 +1480,15 @@ export async function saveInterviewPhaseAction(formData: FormData) {
           "Clarifying questions or assumptions are required.",
         );
 
+        await saveVoiceTurnIfAccepted({
+          tx,
+          formData,
+          userProfileId: userProfile.id,
+          interviewSessionId: activeInterview.id,
+          interviewRoundId: activeRound.id,
+          phase: activePhase,
+          transcript: content,
+        });
         await tx.interviewMessage.createMany({
           data: [
             {
@@ -788,20 +1524,16 @@ export async function saveInterviewPhaseAction(formData: FormData) {
             selectedPatternId,
             patternExplanation,
           },
-          include: {
-            selectedPattern: true,
-            correctPattern: true,
-            problem: {
-              include: {
-                problemPatterns: {
-                  include: {
-                    pattern: true,
-                  },
-                },
-              },
-            },
-            messages: true,
-          },
+          include: interviewRoundAIInclude,
+        });
+        await saveVoiceTurnIfAccepted({
+          tx,
+          formData,
+          userProfileId: userProfile.id,
+          interviewSessionId: activeInterview.id,
+          interviewRoundId: activeRound.id,
+          phase: activePhase,
+          transcript: patternExplanation,
         });
         await tx.interviewMessage.createMany({
           data: [
@@ -827,20 +1559,16 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         const updatedRound = await tx.interviewRound.update({
           where: { id: activeRound.id },
           data: { approachText },
-          include: {
-            selectedPattern: true,
-            correctPattern: true,
-            problem: {
-              include: {
-                problemPatterns: {
-                  include: {
-                    pattern: true,
-                  },
-                },
-              },
-            },
-            messages: true,
-          },
+          include: interviewRoundAIInclude,
+        });
+        await saveVoiceTurnIfAccepted({
+          tx,
+          formData,
+          userProfileId: userProfile.id,
+          interviewSessionId: activeInterview.id,
+          interviewRoundId: activeRound.id,
+          phase: activePhase,
+          transcript: approachText,
         });
         await tx.interviewMessage.createMany({
           data: [
@@ -877,20 +1605,16 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         const updatedRound = await tx.interviewRound.update({
           where: { id: activeRound.id },
           data: { codeText },
-          include: {
-            selectedPattern: true,
-            correctPattern: true,
-            problem: {
-              include: {
-                problemPatterns: {
-                  include: {
-                    pattern: true,
-                  },
-                },
-              },
-            },
-            messages: true,
-          },
+          include: interviewRoundAIInclude,
+        });
+        await saveVoiceTurnIfAccepted({
+          tx,
+          formData,
+          userProfileId: userProfile.id,
+          interviewSessionId: activeInterview.id,
+          interviewRoundId: activeRound.id,
+          phase: activePhase,
+          transcript: codeText,
         });
         await tx.interviewMessage.createMany({
           data: [
@@ -927,20 +1651,16 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         const updatedRound = await tx.interviewRound.update({
           where: { id: activeRound.id },
           data: { testCasesText },
-          include: {
-            selectedPattern: true,
-            correctPattern: true,
-            problem: {
-              include: {
-                problemPatterns: {
-                  include: {
-                    pattern: true,
-                  },
-                },
-              },
-            },
-            messages: true,
-          },
+          include: interviewRoundAIInclude,
+        });
+        await saveVoiceTurnIfAccepted({
+          tx,
+          formData,
+          userProfileId: userProfile.id,
+          interviewSessionId: activeInterview.id,
+          interviewRoundId: activeRound.id,
+          phase: activePhase,
+          transcript: testCasesText,
         });
         await tx.interviewMessage.createMany({
           data: [
@@ -998,20 +1718,16 @@ export async function saveInterviewPhaseAction(formData: FormData) {
 
         let updatedRound = await tx.interviewRound.findUniqueOrThrow({
           where: { id: activeRound.id },
-          include: {
-            selectedPattern: true,
-            correctPattern: true,
-            problem: {
-              include: {
-                problemPatterns: {
-                  include: {
-                    pattern: true,
-                  },
-                },
-              },
-            },
-            messages: true,
-          },
+          include: interviewRoundAIInclude,
+        });
+        await saveVoiceTurnIfAccepted({
+          tx,
+          formData,
+          userProfileId: userProfile.id,
+          interviewSessionId: activeInterview.id,
+          interviewRoundId: activeRound.id,
+          phase: activePhase,
+          transcript: complexityText,
         });
         if (!updatedRound.attemptId) {
           if (!updatedRound.selectedPatternId) {
@@ -1041,20 +1757,7 @@ export async function saveInterviewPhaseAction(formData: FormData) {
             data: {
               attemptId: attempt.id,
             },
-            include: {
-              selectedPattern: true,
-              correctPattern: true,
-              problem: {
-                include: {
-                  problemPatterns: {
-                    include: {
-                      pattern: true,
-                    },
-                  },
-                },
-              },
-              messages: true,
-            },
+            include: interviewRoundAIInclude,
           });
         }
         await tx.interviewMessage.createMany({
@@ -1093,53 +1796,17 @@ export async function saveInterviewPhaseAction(formData: FormData) {
           },
           include: {
             rounds: {
-              include: {
-                selectedPattern: true,
-                correctPattern: true,
-                problem: {
-                  include: {
-                    problemPatterns: {
-                      include: {
-                        pattern: true,
-                      },
-                    },
-                  },
-                },
-                messages: true,
-                debugInsights: {
-                  select: {
-                    id: true,
-                  },
-                },
-                codeSubmissions: {
-                  include: {
-                    codeRuns: {
-                      orderBy: {
-                        createdAt: "asc",
-                      },
-                      include: {
-                        testResults: {
-                          orderBy: {
-                            createdAt: "asc",
-                          },
-                          include: {
-                            testCase: {
-                              select: {
-                                source: true,
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
+              include: interviewRoundAIInclude,
               orderBy: {
                 roundNumber: "asc",
               },
             },
             messages: true,
+            voiceTurns: {
+              orderBy: {
+                createdAt: "asc",
+              },
+            },
           },
         });
 

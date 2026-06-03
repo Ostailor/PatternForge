@@ -57,8 +57,10 @@ export function getInterviewReadinessLabel(score: number): InterviewReadinessLab
 
 export function calculateReadinessScoreBreakdown(
   patternMetrics: PatternMetric[],
-  confusions: PatternConfusionMetric[],
+  _confusions: PatternConfusionMetric[],
   interviewPerformanceScore = 60,
+  codeExecutionDebuggingScore = 60,
+  communicationScore = 60,
 ): ReadinessScoreBreakdown {
   const activePatternMetrics = patternMetrics.filter(hasActivity);
   const totalAttempts = patternMetrics.reduce(
@@ -77,35 +79,12 @@ export function calculateReadinessScoreBreakdown(
     (total, patternMetric) => total + patternMetric.battleVictoryCount,
     0,
   );
-  const totalMistakesAndCards = patternMetrics.reduce(
-    (total, patternMetric) =>
-      total + patternMetric.mistakeCount + patternMetric.flashcardCount,
-    0,
-  );
-  const totalReviews = patternMetrics.reduce(
-    (total, patternMetric) => total + patternMetric.reviewCount,
-    0,
-  );
-  const totalLapses = patternMetrics.reduce(
-    (total, patternMetric) => total + patternMetric.lapseCount,
-    0,
-  );
   const averageConfidence =
     average(
       activePatternMetrics
         .map((patternMetric) => patternMetric.averageConfidence)
         .filter((value): value is number => value !== null),
     ) ?? 0;
-  const reviewRecoveryBase =
-    totalMistakesAndCards === 0
-      ? totalAttempts > 0
-        ? 60
-        : 0
-      : percentage(totalReviews, totalMistakesAndCards);
-  const confusionPenalty = Math.min(
-    25,
-    confusions.reduce((total, confusion) => total + confusion.count, 0) * 3,
-  );
 
   return {
     patternCoverage: percentage(activePatternMetrics.length, patternMetrics.length),
@@ -126,22 +105,22 @@ export function calculateReadinessScoreBreakdown(
     ),
     bossBattlePerformance: percentage(battleVictoryCount, battleCount),
     interviewPerformance: clampScore(interviewPerformanceScore),
-    mistakeRecovery: clampScore(
-      reviewRecoveryBase - Math.min(30, totalLapses * 4) - confusionPenalty,
-    ),
+    codeExecutionDebugging: clampScore(codeExecutionDebuggingScore),
+    communication: clampScore(communicationScore),
     confidence: clampScore((averageConfidence / 5) * 100),
   };
 }
 
 export function getOverallReadinessScore(scores: ReadinessScoreBreakdown): number {
   return clampScore(
-    scores.patternCoverage * 0.13 +
-      scores.patternRecognition * 0.16 +
-      scores.solveConsistency * 0.15 +
-      scores.retention * 0.12 +
-      scores.bossBattlePerformance * 0.1 +
-      scores.interviewPerformance * 0.16 +
-      scores.mistakeRecovery * 0.09 +
-      scores.confidence * 0.09,
+    scores.patternCoverage * 0.11 +
+      scores.patternRecognition * 0.14 +
+      scores.solveConsistency * 0.14 +
+      scores.retention * 0.11 +
+      scores.bossBattlePerformance * 0.09 +
+      scores.interviewPerformance * 0.14 +
+      scores.codeExecutionDebugging * 0.1 +
+      scores.communication * 0.1 +
+      scores.confidence * 0.07,
   );
 }

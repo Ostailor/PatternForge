@@ -9,6 +9,7 @@ import type {
   WorkspaceSubmissionHistoryItem,
   WorkspaceTestCaseItem,
 } from "@/components/code-workspace/types";
+import VoiceTurnCard from "@/components/voice-mode/VoiceTurnCard";
 import ProgressBar from "@/components/ProgressBar";
 import { patterns } from "@/data/patterns";
 import { TestCaseSource } from "@/generated/prisma/client";
@@ -26,6 +27,8 @@ import {
   abandonInterviewAction,
   saveInterviewPhaseAction,
 } from "./actions";
+import InterviewerSpeechPlayback from "./interviewer-speech-playback";
+import InterviewVoiceMode from "./interview-voice-mode";
 import InterviewTimer from "./interview-timer";
 
 type InterviewRunnerPageProps = {
@@ -234,6 +237,26 @@ function shouldShowWorkspace(phase: InterviewPhase): boolean {
   return phase === "Implementation" || phase === "Testing";
 }
 
+function getVoiceTargetFieldName(phase: InterviewPhase): string | null {
+  switch (phase) {
+    case "ClarifyingQuestions":
+      return "clarifyingQuestions";
+    case "PatternHypothesis":
+      return "patternExplanation";
+    case "Approach":
+      return "approachText";
+    case "Implementation":
+      return "codeText";
+    case "Testing":
+      return "testCasesText";
+    case "Complexity":
+      return "complexityText";
+    case "Setup":
+    case "Feedback":
+      return null;
+  }
+}
+
 async function getInterviewForRunner(
   interviewId: string,
   userProfileId: string,
@@ -258,6 +281,11 @@ async function getInterviewForRunner(
           feedbackRecords: {
             orderBy: {
               createdAt: "desc",
+            },
+          },
+          voiceTurns: {
+            orderBy: {
+              createdAt: "asc",
             },
           },
         },
@@ -771,6 +799,8 @@ function AIInterviewerPanel({
   phase: InterviewPhase;
   messages: InterviewMessageForRunner[];
 }) {
+  const phaseInstruction = getPhaseInstructions(phase);
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
@@ -780,8 +810,20 @@ function AIInterviewerPanel({
         {formatPhase(phase)}
       </h2>
       <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-        {getPhaseInstructions(phase)}
+        {phaseInstruction}
       </p>
+      <div className="mt-5">
+        <InterviewerSpeechPlayback
+          phase={phase}
+          phaseInstruction={phaseInstruction}
+          messages={messages.map((message) => ({
+            id: message.id,
+            role: message.role,
+            phase: message.phase,
+            content: message.content,
+          }))}
+        />
+      </div>
       <div className="mt-5 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
         {messages.length === 0 ? (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 text-slate-600">
@@ -831,6 +873,11 @@ function PhaseInputPanel({
     return <FeedbackPanel interview={interview} />;
   }
 
+  const voiceTargetFieldName = getVoiceTargetFieldName(currentPhase);
+  const savedVoiceTurns = currentRound.voiceTurns.filter(
+    (turn) => turn.phase === currentPhase,
+  );
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
@@ -844,6 +891,15 @@ function PhaseInputPanel({
         <input type="hidden" name="roundId" value={currentRound.id} />
         <input type="hidden" name="phase" value={currentPhase} />
         <PhaseFields round={currentRound} currentPhase={currentPhase} />
+        {voiceTargetFieldName ? (
+          <InterviewVoiceMode
+            interviewId={interview.id}
+            roundId={currentRound.id}
+            phase={currentPhase}
+            targetFieldName={voiceTargetFieldName}
+            isOptional={currentPhase === "Implementation"}
+          />
+        ) : null}
         {currentPhase === "Implementation" ? (
           <Link
             href={`/problems/${currentRound.problemId}/workspace?mode=Interview&interviewId=${interview.id}&interviewRoundId=${currentRound.id}`}
@@ -856,6 +912,24 @@ function PhaseInputPanel({
           Continue
         </button>
       </form>
+      {savedVoiceTurns.length > 0 ? (
+        <div className="mt-6 space-y-3">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+            Saved voice turns
+          </p>
+          {savedVoiceTurns.map((turn) => (
+            <VoiceTurnCard
+              key={turn.id}
+              phase={turn.phase}
+              speaker={turn.speaker}
+              transcript={turn.transcript}
+              durationMs={turn.durationMs}
+              createdAt={turn.createdAt}
+              audioUrl={turn.audioUrl}
+            />
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1107,6 +1181,13 @@ function FeedbackPanel({ interview }: { interview: InterviewForRunner }) {
 
       {feedback ? (
         <>
+          <div className="mt-5">
+            <InterviewerSpeechPlayback
+              phase="Feedback"
+              feedbackSummary={feedback.summary}
+              followUpRecommendations={feedback.followUpRecommendations}
+            />
+          </div>
           <p className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 text-slate-700">
             {feedback.summary}
           </p>

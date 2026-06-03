@@ -16,6 +16,13 @@ test("buildGameEventKey uses user, event type, and linked source metadata", () =
     buildGameEventKey("user-1", "ReviewCompleted", { reviewLogId: "review-1" }),
     "user-1:ReviewCompleted:reviewLog:review-1",
   );
+  assert.equal(
+    buildGameEventKey("user-1", "VoiceInterviewCompleted", {
+      interviewId: "interview-1",
+      voiceSessionId: "voice-session-1",
+    }),
+    "user-1:VoiceInterviewCompleted:voiceSession:voice-session-1",
+  );
 });
 
 test("getLegacySourceId reads supported metadata link fields", () => {
@@ -24,6 +31,12 @@ test("getLegacySourceId reads supported metadata link fields", () => {
   assert.equal(getLegacySourceId({ questId: "quest-1" }), "quest-1");
   assert.equal(getLegacySourceId({ achievementId: "achievement-1" }), "achievement-1");
   assert.equal(getLegacySourceId({ contrastDrillId: "drill-1" }), "drill-1");
+  assert.equal(getLegacySourceId({ voiceSessionId: "voice-1" }), "voice-1");
+  assert.equal(getLegacySourceId({ speakingDrillId: "speaking-1" }), "speaking-1");
+  assert.equal(
+    getLegacySourceId({ communicationInsightId: "insight-1" }),
+    "insight-1",
+  );
   assert.equal(getLegacySourceId({}), null);
 });
 
@@ -45,6 +58,9 @@ test("summarizeXPBreakdown groups XP by game event type", () => {
       QuestCompleted: 0,
       AchievementEarned: 0,
       ContrastDrillCompleted: 0,
+      VoiceInterviewCompleted: 0,
+      SpeakingDrillCompleted: 0,
+      CommunicationInsightCreated: 0,
       total: 65,
     },
   );

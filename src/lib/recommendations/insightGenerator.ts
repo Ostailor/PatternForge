@@ -184,7 +184,7 @@ export function buildMockInterviewRecommendation({
   return {
     title,
     reason,
-    priority: 4,
+    priority: 5,
     recommendationType: "MockInterview",
     metadata,
     evidence,
@@ -207,7 +207,7 @@ export function buildFocusedInterviewRecommendation({
   return {
     title: `Start focused ${patternName} interview`,
     reason,
-    priority: 4,
+    priority: 5,
     recommendationType: "FocusedInterview",
     targetPatternId: patternId,
     metadata,
@@ -233,10 +233,72 @@ export function buildWeaknessRepairInterviewRecommendation({
       ? `Repair ${patternName} interview weakness`
       : "Start weakness repair interview",
     reason,
-    priority: 4,
+    priority: 5,
     recommendationType: "WeaknessRepairInterview",
     targetPatternId: patternId,
     metadata,
+    evidence,
+  };
+}
+
+export function buildVoiceInterviewRecommendation({
+  title,
+  reason,
+  evidence,
+  metadata,
+  priority = 5,
+}: {
+  title: string;
+  reason: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+  priority?: number;
+}): RecommendationCandidate {
+  return {
+    title,
+    reason,
+    priority,
+    recommendationType: "VoiceInterview",
+    metadata: {
+      ...metadata,
+      voiceMode: true,
+    },
+    evidence,
+  };
+}
+
+export function buildSpeakingDrillRecommendation({
+  recommendationType,
+  title,
+  reason,
+  evidence,
+  metadata,
+  patternId,
+  problemId,
+}: {
+  recommendationType:
+    | "SpeakingDrill"
+    | "ExplainPattern"
+    | "ComplexityNarration"
+    | "TestingNarration";
+  title: string;
+  reason: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+  patternId?: string;
+  problemId?: string;
+}): RecommendationCandidate {
+  return {
+    title,
+    reason,
+    priority: 4,
+    recommendationType,
+    targetPatternId: patternId,
+    problemId,
+    metadata: {
+      ...metadata,
+      speakingDrill: true,
+    },
     evidence,
   };
 }
