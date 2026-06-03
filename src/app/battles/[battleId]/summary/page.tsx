@@ -86,6 +86,61 @@ function getReflectionPreview(reflection: string | undefined): string {
   return reflection.trim().replace(/\s+/g, " ").slice(0, 180);
 }
 
+function getRoundExecutionSummary(round: RoundForSummary) {
+  const runs = round.codeSubmissions
+    .flatMap((submission) => submission.codeRuns)
+    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+  const latestRun = runs.at(-1);
+  const latestTestResults = latestRun?.testResults ?? [];
+  const failedTestResults = latestTestResults.filter(
+    (testResult) => !testResult.passed,
+  );
+  const customTestRuns = runs.filter((run) => run.runType === "CustomTests");
+  const latestCustomRun = customTestRuns.at(-1);
+  const latestUserTestResults =
+    latestCustomRun?.testResults.filter(
+      (testResult) => testResult.testCase?.source === "User",
+    ) ?? [];
+  const userTestCaseIds = new Set(
+    latestUserTestResults
+      .map((testResult) => testResult.testCaseId)
+      .filter((testCaseId): testCaseId is string => Boolean(testCaseId)),
+  );
+
+  return {
+    latestStatus: latestRun?.status ?? null,
+    testsPassed: latestTestResults.length - failedTestResults.length,
+    testsFailed: failedTestResults.length,
+    runtimeError: latestRun?.errorMessage ?? null,
+    debugInsightCount: runs.reduce(
+      (total, run) => total + run.debugInsights.length,
+      0,
+    ),
+    hasSuccessfulCustomTestRun: customTestRuns.some(
+      (run) => run.status === "Succeeded",
+    ),
+    userCreatedTestCount: userTestCaseIds.size,
+    allUserCustomTestsPassed:
+      userTestCaseIds.size > 0 &&
+      latestUserTestResults.every((testResult) => testResult.passed),
+  };
+}
+
+function getExecutionBonusXp(rounds: RoundForSummary[]): number {
+  const summaries = rounds.map(getRoundExecutionSummary);
+
+  return (
+    (summaries.some((summary) => summary.hasSuccessfulCustomTestRun) ? 10 : 0) +
+    (summaries.some((summary) => summary.allUserCustomTestsPassed) ? 10 : 0) +
+    (summaries.reduce(
+      (total, summary) => total + summary.userCreatedTestCount,
+      0,
+    ) >= 2
+      ? 5
+      : 0)
+  );
+}
+
 function readMetadataId(
   event: GameEventForSummary,
   key: "questId" | "achievementId",
@@ -183,6 +238,30 @@ async function getBattleForSummary(battleId: string, userProfileId: string) {
             include: {
               selectedPattern: true,
               correctPattern: true,
+            },
+          },
+          codeSubmissions: {
+            include: {
+              codeRuns: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+                include: {
+                  testResults: {
+                    orderBy: {
+                      createdAt: "asc",
+                    },
+                    include: {
+                      testCase: {
+                        select: {
+                          source: true,
+                        },
+                      },
+                    },
+                  },
+                  debugInsights: true,
+                },
+              },
             },
           },
         },
@@ -354,6 +433,7 @@ export default async function BattleSummaryPage({
     (pattern) => pattern.id === weakestPatternId,
   );
   const finalAttempt = completedRounds.at(-1)?.attempt;
+  const executionBonusXp = getExecutionBonusXp(battle.rounds);
   const artifacts = await getBattleArtifacts({
     userProfileId: userProfile.id,
     battleId: battle.id,
@@ -454,6 +534,11 @@ export default async function BattleSummaryPage({
           label="Average confidence"
           value={averageConfidence.toFixed(1)}
           detail="Self-rated attempt confidence"
+        />
+        <SummaryStat
+          label="Execution bonus"
+          value={`+${executionBonusXp}`}
+          detail="Optional PatternForge custom-test XP"
         />
       </section>
 
@@ -717,64 +802,104 @@ function RoundBreakdown({ rounds }: { rounds: RoundForSummary[] }) {
         Round-by-round breakdown
       </p>
       <div className="mt-5 grid gap-3">
-        {rounds.map((round) => (
-          <div
-            key={round.id}
-            className="rounded-lg border border-slate-200 bg-slate-50 p-4"
-          >
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
-                  Round {round.roundNumber} · {formatRoundType(round.roundType)}
-                </p>
-                <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">
-                  {round.problem.title}
-                </h2>
-                <p className="mt-1 text-sm font-bold text-slate-500">
-                  {round.problem.difficulty}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <RoundPill
-                  label={
-                    round.attempt?.wasPatternCorrect
-                      ? "Recognition correct"
-                      : "Recognition miss"
-                  }
-                  tone={round.attempt?.wasPatternCorrect ? "teal" : "amber"}
-                />
-                <RoundPill
-                  label={toSolvedStatusLabel(round.attempt?.solvedStatus)}
-                  tone={round.attempt?.solvedStatus === "Solved" ? "teal" : "slate"}
-                />
-              </div>
-            </div>
+        {rounds.map((round) => {
+          const execution = getRoundExecutionSummary(round);
 
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Detail
-                label="Selected pattern"
-                value={round.attempt?.selectedPattern.name ?? "No selection"}
-              />
-              <Detail
-                label="Correct pattern"
-                value={
-                  round.attempt?.correctPattern.name ??
-                  round.expectedPattern.name
-                }
-              />
-              <Detail
-                label="Confidence"
-                value={
-                  round.attempt ? `${round.attempt.confidence}/5` : "No attempt"
-                }
-              />
-              <Detail
-                label="Reflection preview"
-                value={getReflectionPreview(round.attempt?.reflection)}
-              />
+          return (
+            <div
+              key={round.id}
+              className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                    Round {round.roundNumber} · {formatRoundType(round.roundType)}
+                  </p>
+                  <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">
+                    {round.problem.title}
+                  </h2>
+                  <p className="mt-1 text-sm font-bold text-slate-500">
+                    {round.problem.difficulty}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <RoundPill
+                    label={
+                      round.attempt?.wasPatternCorrect
+                        ? "Recognition correct"
+                        : "Recognition miss"
+                    }
+                    tone={round.attempt?.wasPatternCorrect ? "teal" : "amber"}
+                  />
+                  <RoundPill
+                    label={toSolvedStatusLabel(round.attempt?.solvedStatus)}
+                    tone={round.attempt?.solvedStatus === "Solved" ? "teal" : "slate"}
+                  />
+                  <RoundPill
+                    label={
+                      execution.latestStatus
+                        ? `Run ${execution.latestStatus}`
+                        : "No code run"
+                    }
+                    tone={
+                      execution.latestStatus === "Succeeded"
+                        ? "teal"
+                        : execution.latestStatus
+                          ? "amber"
+                          : "slate"
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Detail
+                  label="Selected pattern"
+                  value={round.attempt?.selectedPattern.name ?? "No selection"}
+                />
+                <Detail
+                  label="Correct pattern"
+                  value={
+                    round.attempt?.correctPattern.name ??
+                    round.expectedPattern.name
+                  }
+                />
+                <Detail
+                  label="Confidence"
+                  value={
+                    round.attempt ? `${round.attempt.confidence}/5` : "No attempt"
+                  }
+                />
+                <Detail
+                  label="Reflection preview"
+                  value={getReflectionPreview(round.attempt?.reflection)}
+                />
+                <Detail
+                  label="Custom tests"
+                  value={
+                    execution.latestStatus
+                      ? `${execution.testsPassed} passed, ${execution.testsFailed} failed`
+                      : "Not run"
+                  }
+                />
+                <Detail
+                  label="Runtime errors"
+                  value={execution.runtimeError ?? "None recorded"}
+                />
+                <Detail
+                  label="User tests"
+                  value={`${execution.userCreatedTestCount} saved custom test${
+                    execution.userCreatedTestCount === 1 ? "" : "s"
+                  }`}
+                />
+                <Detail
+                  label="Debug insights"
+                  value={`${execution.debugInsightCount} generated`}
+                />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

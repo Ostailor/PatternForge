@@ -92,6 +92,50 @@ test("keeps interview readiness behind due review and severe weakness", () => {
   assert.equal(next?.recommendationType, "DueReview");
 });
 
+test("keeps execution recommendations behind due reviews", () => {
+  const next = selectNextBestAction([
+    candidate({
+      title: "Debug Sliding Window runtime errors",
+      priority: 5,
+      recommendationType: "DebugDrill",
+      targetPatternId: "sliding-window",
+      evidence: ["2 runtime error runs"],
+    }),
+    candidate({
+      title: "Practice writing custom tests",
+      priority: 6,
+      recommendationType: "TestingPractice",
+      evidence: ["0.5 average tests per run"],
+    }),
+    candidate({
+      title: "Daily Review",
+      priority: 1,
+      recommendationType: "DueReview",
+      metadata: { dueCount: 4 },
+    }),
+  ]);
+
+  assert.equal(next?.recommendationType, "DueReview");
+});
+
+test("orders execution recommendations by their recovery urgency", () => {
+  const next = selectNextBestAction([
+    candidate({
+      title: "Practice writing custom tests",
+      priority: 6,
+      recommendationType: "TestingPractice",
+    }),
+    candidate({
+      title: "Implementation practice: Sliding Window",
+      priority: 5,
+      recommendationType: "ImplementationPractice",
+      targetPatternId: "sliding-window",
+    }),
+  ]);
+
+  assert.equal(next?.recommendationType, "ImplementationPractice");
+});
+
 test("allows active interview resume in the active session priority tier", () => {
   const next = selectNextBestAction([
     candidate({

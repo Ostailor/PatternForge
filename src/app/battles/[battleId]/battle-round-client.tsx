@@ -8,12 +8,26 @@ import {
   type SaveBattleRoundAttemptInput,
 } from "@/app/battles/[battleId]/actions";
 import AIReviewPanel from "@/components/AIReviewPanel";
+import { CodeWorkspace } from "@/components/code-workspace";
+import type {
+  DebugInsightView,
+  WorkspaceRunSummary,
+  WorkspaceSubmissionHistoryItem,
+  WorkspaceTestCaseItem,
+} from "@/components/code-workspace/types";
 import RecognitionQuiz from "@/components/RecognitionQuiz";
 import SessionSummary from "@/components/SessionSummary";
 import { getPatternById } from "@/data/patterns";
 import type { Attempt, Confidence, Pattern, Problem, SolvedStatus } from "@/lib/types";
 
-type BattleRoundStep = "preview" | "quiz" | "reflection" | "summary";
+type BattleRoundStep = "preview" | "quiz" | "workspace" | "reflection" | "summary";
+
+type BattleWorkspaceData = {
+  runnerConfigured: boolean;
+  initialHistory: WorkspaceSubmissionHistoryItem[];
+  initialTestCases: WorkspaceTestCaseItem[];
+  initialDebugInsight: DebugInsightView | null;
+};
 
 type BattleRoundClientProps = {
   battleId: string;
@@ -21,6 +35,7 @@ type BattleRoundClientProps = {
   problem: Problem;
   patterns: Pattern[];
   isFinalRound: boolean;
+  workspaceData: BattleWorkspaceData;
 };
 
 const difficultyStyles: Record<Problem["difficulty"], string> = {
@@ -35,10 +50,16 @@ export default function BattleRoundClient({
   problem,
   patterns,
   isFinalRound,
+  workspaceData,
 }: BattleRoundClientProps) {
   const [step, setStep] = useState<BattleRoundStep>("preview");
   const [selectedPatternId, setSelectedPatternId] = useState("");
   const [savedAttempt, setSavedAttempt] = useState<Attempt | null>(null);
+  const [codeSubmissionId, setCodeSubmissionId] = useState<string | undefined>();
+  const [latestRunSummary, setLatestRunSummary] =
+    useState<WorkspaceRunSummary | null>(null);
+  const [latestDebugInsight, setLatestDebugInsight] =
+    useState<DebugInsightView | null>(null);
   const correctPattern = getPatternById(problem.primaryPatternId);
 
   return (
@@ -46,7 +67,12 @@ export default function BattleRoundClient({
       <BattleStepRail currentStep={step} />
 
       {step === "preview" ? (
-        <ProblemPreview problem={problem} onStart={() => setStep("quiz")} />
+        <ProblemPreview
+          battleId={battleId}
+          roundId={roundId}
+          problem={problem}
+          onStart={() => setStep("quiz")}
+        />
       ) : null}
 
       {step === "quiz" ? (
@@ -55,9 +81,57 @@ export default function BattleRoundClient({
           patterns={patterns}
           onContinue={(nextSelectedPatternId) => {
             setSelectedPatternId(nextSelectedPatternId);
-            setStep("reflection");
+            setStep("workspace");
           }}
         />
+      ) : null}
+
+      {step === "workspace" ? (
+        <div className="space-y-5">
+          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+                  Optional code
+                </p>
+                <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+                  Code Workspace
+                </h2>
+                <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+                  Write Python and run PatternForge custom tests if it helps
+                  your round. Battle scoring still prioritizes recognition and
+                  solve status.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep("reflection")}
+                className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700"
+              >
+                Continue to attempt log
+              </button>
+            </div>
+          </section>
+          <CodeWorkspace
+            problem={problem}
+            context={{
+              mode: "Battle",
+              battleRoundId: roundId,
+              returnHref: `/battles/${battleId}`,
+              returnLabel: "Back to Battle",
+            }}
+            runnerConfigured={workspaceData.runnerConfigured}
+            initialHistory={workspaceData.initialHistory}
+            initialTestCases={workspaceData.initialTestCases}
+            initialDebugInsight={workspaceData.initialDebugInsight}
+            isAuthenticated
+            embedded
+            onSubmissionChange={setCodeSubmissionId}
+            onRunChange={setLatestRunSummary}
+            onDebugInsightChange={setLatestDebugInsight}
+            onSaveAttempt={() => setStep("reflection")}
+          />
+        </div>
       ) : null}
 
       {step === "reflection" ? (
@@ -66,6 +140,7 @@ export default function BattleRoundClient({
           roundId={roundId}
           problem={problem}
           selectedPatternId={selectedPatternId}
+          codeSubmissionId={codeSubmissionId}
           onSaved={(attempt) => {
             setSavedAttempt(attempt);
             setStep("summary");
@@ -79,9 +154,14 @@ export default function BattleRoundClient({
             attempt={savedAttempt}
             problem={problem}
             correctPattern={correctPattern}
+            codeRunSummary={latestRunSummary}
+            latestDebugInsight={latestDebugInsight}
           />
           <div id="ai-coach">
-            <AIReviewPanel attempt={savedAttempt} />
+            <AIReviewPanel
+              attempt={savedAttempt}
+              hasLinkedWorkspaceCode={Boolean(codeSubmissionId)}
+            />
           </div>
           {!isFinalRound ? (
             <Link
@@ -101,12 +181,13 @@ function BattleStepRail({ currentStep }: { currentStep: BattleRoundStep }) {
   const steps: [BattleRoundStep, string][] = [
     ["preview", "Problem Intel"],
     ["quiz", "Pattern Read"],
+    ["workspace", "Code"],
     ["reflection", "Attempt Log"],
     ["summary", "Round Result"],
   ];
 
   return (
-    <div className="grid gap-3 sm:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-5">
       {steps.map(([step, label], index) => (
         <div
           key={step}
@@ -127,9 +208,13 @@ function BattleStepRail({ currentStep }: { currentStep: BattleRoundStep }) {
 }
 
 function ProblemPreview({
+  battleId,
+  roundId,
   problem,
   onStart,
 }: {
+  battleId: string;
+  roundId: string;
   problem: Problem;
   onStart: () => void;
 }) {
@@ -179,6 +264,12 @@ function ProblemPreview({
         >
           Open Problem on LeetCode
         </a>
+        <Link
+          href={`/problems/${problem.id}/workspace?mode=Battle&battleId=${battleId}&battleRoundId=${roundId}`}
+          className="rounded-lg border border-slate-200 bg-white px-5 py-3 text-center text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-50"
+        >
+          Open Code Workspace
+        </Link>
         <button
           type="button"
           onClick={onStart}
@@ -196,12 +287,14 @@ function BattleReflectionForm({
   roundId,
   problem,
   selectedPatternId,
+  codeSubmissionId,
   onSaved,
 }: {
   battleId: string;
   roundId: string;
   problem: Problem;
   selectedPatternId: string;
+  codeSubmissionId?: string;
   onSaved: (attempt: Attempt) => void;
 }) {
   const [solvedStatus, setSolvedStatus] = useState<SolvedStatus>("Not Solved");
@@ -237,6 +330,7 @@ function BattleReflectionForm({
       timeSpentMinutes,
       confidence,
       reflection,
+      codeSubmissionId,
     };
     const result = await saveBattleRoundAttemptAction(input);
 

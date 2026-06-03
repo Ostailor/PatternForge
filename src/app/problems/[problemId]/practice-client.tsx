@@ -1,8 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import AIReviewPanel from "@/components/AIReviewPanel";
+import { CodeWorkspace } from "@/components/code-workspace";
+import type {
+  DebugInsightView,
+  WorkspaceRunSummary,
+  WorkspaceSubmissionHistoryItem,
+  WorkspaceTestCaseItem,
+} from "@/components/code-workspace/types";
 import HintPanel from "@/components/HintPanel";
 import RecognitionQuiz from "@/components/RecognitionQuiz";
 import ReflectionForm from "@/components/ReflectionForm";
@@ -17,11 +25,16 @@ import { mergeAttempt } from "@/lib/progress";
 import type { Attempt, Pattern, Problem } from "@/lib/types";
 import { useAuthProgress } from "@/lib/use-auth-progress";
 
-type PracticeStep = "preview" | "quiz" | "reflection" | "summary";
+type PracticeStep = "preview" | "quiz" | "workspace" | "reflection" | "summary";
 
 type ProblemPracticeClientProps = {
   problem: Problem;
   patterns: Pattern[];
+  runnerConfigured: boolean;
+  initialHistory: WorkspaceSubmissionHistoryItem[];
+  initialTestCases: WorkspaceTestCaseItem[];
+  initialDebugInsight: DebugInsightView | null;
+  isAuthenticated: boolean;
 };
 
 const difficultyStyles: Record<Problem["difficulty"], string> = {
@@ -33,11 +46,23 @@ const difficultyStyles: Record<Problem["difficulty"], string> = {
 export default function ProblemPracticeClient({
   problem,
   patterns,
+  runnerConfigured,
+  initialHistory,
+  initialTestCases,
+  initialDebugInsight,
+  isAuthenticated,
 }: ProblemPracticeClientProps) {
   const { progress } = useAuthProgress();
   const [step, setStep] = useState<PracticeStep>("preview");
   const [selectedPatternId, setSelectedPatternId] = useState("");
   const [savedAttempt, setSavedAttempt] = useState<Attempt | undefined>();
+  const [codeSubmissionId, setCodeSubmissionId] = useState<
+    string | undefined
+  >();
+  const [latestRunSummary, setLatestRunSummary] =
+    useState<WorkspaceRunSummary | null>(null);
+  const [latestDebugInsight, setLatestDebugInsight] =
+    useState<DebugInsightView | null>(null);
   const [levelUp, setLevelUp] = useState<{
     patternName: string;
     levelName: string;
@@ -82,6 +107,7 @@ export default function ProblemPracticeClient({
             {[
               ["preview", "Problem Preview"],
               ["quiz", "Pattern Recognition"],
+              ["workspace", "Code Workspace"],
               ["reflection", "Reflection"],
               ["summary", "Summary"],
             ].map(([stepId, label], index) => (
@@ -149,6 +175,12 @@ export default function ProblemPracticeClient({
                 >
                   Open Problem on LeetCode
                 </a>
+                <Link
+                  href={`/problems/${problem.id}/workspace?mode=Practice`}
+                  className="rounded-lg border border-slate-200 bg-white px-5 py-3 text-center text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Open Code Workspace
+                </Link>
                 <button
                   type="button"
                   onClick={() => setStep("quiz")}
@@ -166,7 +198,7 @@ export default function ProblemPracticeClient({
               patterns={patterns}
               onContinue={(nextSelectedPatternId) => {
                 setSelectedPatternId(nextSelectedPatternId);
-                setStep("reflection");
+                setStep("workspace");
               }}
             />
           ) : null}
@@ -175,10 +207,58 @@ export default function ProblemPracticeClient({
             <HintPanel problem={problem} />
           ) : null}
 
+          {step === "workspace" ? (
+            <div className="space-y-5">
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+                      Step 3
+                    </p>
+                    <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">
+                      Code workspace
+                    </h2>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+                      Write Python and run your own custom tests. This step is
+                      optional; you can continue to reflection without running
+                      code.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setStep("reflection")}
+                    className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-teal-700"
+                  >
+                    Continue to reflection
+                  </button>
+                </div>
+              </section>
+              <CodeWorkspace
+                problem={problem}
+                context={{
+                  mode: "Practice",
+                  returnHref: `/problems/${problem.id}`,
+                  returnLabel: "Back to Practice",
+                }}
+                runnerConfigured={runnerConfigured}
+                initialHistory={initialHistory}
+                initialTestCases={initialTestCases}
+                initialDebugInsight={initialDebugInsight}
+                isAuthenticated={isAuthenticated}
+                embedded
+                onSubmissionChange={setCodeSubmissionId}
+                onRunChange={setLatestRunSummary}
+                onDebugInsightChange={setLatestDebugInsight}
+                onSaveAttempt={() => setStep("reflection")}
+              />
+            </div>
+          ) : null}
+
           {step === "reflection" ? (
             <ReflectionForm
               problem={problem}
               selectedPatternId={selectedPatternId}
+              codeSubmissionId={codeSubmissionId}
               onSaved={(attempt) => {
                 setLevelUp(detectLevelUp(attempt));
                 setSavedAttempt(attempt);
@@ -194,9 +274,14 @@ export default function ProblemPracticeClient({
                 problem={problem}
                 correctPattern={correctPattern}
                 levelUp={levelUp}
+                codeRunSummary={latestRunSummary}
+                latestDebugInsight={latestDebugInsight}
               />
               <div id="ai-coach">
-                <AIReviewPanel attempt={savedAttempt} />
+                <AIReviewPanel
+                  attempt={savedAttempt}
+                  hasLinkedWorkspaceCode={Boolean(codeSubmissionId)}
+                />
               </div>
             </>
           ) : null}

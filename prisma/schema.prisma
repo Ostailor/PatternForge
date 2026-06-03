@@ -89,6 +89,9 @@ enum RecommendationType {
   FocusedInterview
   WeaknessRepairInterview
   DailyForge
+  DebugDrill
+  TestingPractice
+  ImplementationPractice
 }
 
 enum RecommendationStatus {
@@ -194,6 +197,37 @@ enum RubricCategory {
   TimeManagement
 }
 
+enum CodeLanguage {
+  Python
+}
+
+enum CodeSubmissionStatus {
+  Draft
+  Submitted
+  Reviewed
+}
+
+enum CodeRunType {
+  CustomTests
+  SmokeTest
+  FreeRun
+}
+
+enum CodeRunStatus {
+  Queued
+  Running
+  Succeeded
+  Failed
+  TimedOut
+  RuntimeError
+  ValidationError
+}
+
+enum TestCaseSource {
+  User
+  PatternForge
+}
+
 model UserProfile {
   id                     String                   @id @default(cuid())
   authUserId             String                   @unique
@@ -215,6 +249,10 @@ model UserProfile {
   learningPlans          LearningPlan[]
   recommendationFeedback RecommendationFeedback[]
   interviewSessions      InterviewSession[]
+  codeSubmissions        CodeSubmission[]
+  codeRuns               CodeRun[]
+  testCases              TestCase[]
+  debugInsights          DebugInsight[]
 }
 
 model Pattern {
@@ -250,15 +288,15 @@ model Pattern {
 }
 
 model Problem {
-  id                String             @id
+  id                String                @id
   title             String
-  url               String             @unique
+  url               String                @unique
   difficulty        Difficulty
   estimatedMinutes  Int
-  recognitionClues  String[]           @default([])
-  commonMistakes    String[]           @default([])
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  recognitionClues  String[]              @default([])
+  commonMistakes    String[]              @default([])
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
   problemPatterns   ProblemPattern[]
   attempts          Attempt[]
   aiReviews         AIReview[]
@@ -267,6 +305,9 @@ model Problem {
   recommendations   Recommendation[]
   learningPlanSteps LearningPlanStep[]
   interviewRounds   InterviewRound[]
+  runnerConfigs     ProblemRunnerConfig[]
+  codeSubmissions   CodeSubmission[]
+  testCases         TestCase[]
 }
 
 model ProblemPattern {
@@ -281,6 +322,24 @@ model ProblemPattern {
   @@index([problemId])
   @@index([patternId])
   @@index([problemId, isPrimary])
+}
+
+model ProblemRunnerConfig {
+  id              String       @id @default(cuid())
+  problemId       String
+  language        CodeLanguage
+  functionName    String
+  inputSchema     Json
+  outputSchema    Json
+  harnessTemplate String       @db.Text
+  isEnabled       Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  problem         Problem      @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@index([problemId])
+  @@index([language])
+  @@index([createdAt])
 }
 
 model Attempt {
@@ -304,6 +363,8 @@ model Attempt {
   flashcards        Flashcard[]
   battleRounds      BattleRound[]
   interviewRounds   InterviewRound[]
+  codeSubmissions   CodeSubmission[]
+  debugInsights     DebugInsight[]
 
   @@index([userProfileId])
   @@index([problemId])
@@ -445,7 +506,7 @@ model Battle {
 }
 
 model BattleRound {
-  id                String    @id @default(cuid())
+  id                String           @id @default(cuid())
   battleId          String
   problemId         String
   roundNumber       Int
@@ -453,12 +514,13 @@ model BattleRound {
   expectedPatternId String
   attemptId         String?
   completedAt       DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  battle            Battle    @relation(fields: [battleId], references: [id], onDelete: Cascade)
-  problem           Problem   @relation(fields: [problemId], references: [id], onDelete: Restrict)
-  expectedPattern   Pattern   @relation(fields: [expectedPatternId], references: [id], onDelete: Restrict)
-  attempt           Attempt?  @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  battle            Battle           @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  problem           Problem          @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  expectedPattern   Pattern          @relation(fields: [expectedPatternId], references: [id], onDelete: Restrict)
+  attempt           Attempt?         @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  codeSubmissions   CodeSubmission[]
 
   @@unique([battleId, roundNumber])
   @@index([battleId])
@@ -731,6 +793,8 @@ model InterviewRound {
   aiReview           AIReview?            @relation(fields: [aiReviewId], references: [id], onDelete: SetNull)
   messages           InterviewMessage[]
   feedbackRecords    InterviewFeedback[]
+  codeSubmissions    CodeSubmission[]
+  debugInsights      DebugInsight[]
 
   @@unique([interviewSessionId, roundNumber])
   @@index([interviewSessionId])
@@ -743,6 +807,125 @@ model InterviewRound {
   @@index([correctPatternId])
   @@index([attemptId])
   @@index([aiReviewId])
+}
+
+model CodeSubmission {
+  id               String               @id @default(cuid())
+  userProfileId    String
+  problemId        String
+  attemptId        String?
+  interviewRoundId String?
+  battleRoundId    String?
+  language         CodeLanguage
+  code             String               @db.Text
+  status           CodeSubmissionStatus @default(Draft)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  userProfile      UserProfile          @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  problem          Problem              @relation(fields: [problemId], references: [id], onDelete: Restrict)
+  attempt          Attempt?             @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  interviewRound   InterviewRound?      @relation(fields: [interviewRoundId], references: [id], onDelete: SetNull)
+  battleRound      BattleRound?         @relation(fields: [battleRoundId], references: [id], onDelete: SetNull)
+  codeRuns         CodeRun[]
+
+  @@index([userProfileId])
+  @@index([problemId])
+  @@index([attemptId])
+  @@index([interviewRoundId])
+  @@index([battleRoundId])
+  @@index([status])
+  @@index([language])
+  @@index([createdAt])
+}
+
+model CodeRun {
+  id               String         @id @default(cuid())
+  userProfileId    String
+  codeSubmissionId String
+  runType          CodeRunType
+  status           CodeRunStatus  @default(Queued)
+  stdout           String         @default("") @db.Text
+  stderr           String         @default("") @db.Text
+  compileOutput    String?        @db.Text
+  errorMessage     String?        @db.Text
+  runtimeMs        Int?
+  memoryKb         Int?
+  createdAt        DateTime       @default(now())
+  userProfile      UserProfile    @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  codeSubmission   CodeSubmission @relation(fields: [codeSubmissionId], references: [id], onDelete: Cascade)
+  testResults      TestResult[]
+  debugInsights    DebugInsight[]
+
+  @@index([userProfileId])
+  @@index([codeSubmissionId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model TestCase {
+  id                 String         @id @default(cuid())
+  userProfileId      String?
+  problemId          String
+  source             TestCaseSource
+  name               String
+  inputJson          Json
+  expectedOutputJson Json
+  isPublic           Boolean        @default(false)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  userProfile        UserProfile?   @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  problem            Problem        @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  testResults        TestResult[]
+
+  @@index([userProfileId])
+  @@index([problemId])
+  @@index([source])
+  @@index([createdAt])
+}
+
+model TestResult {
+  id                 String    @id @default(cuid())
+  codeRunId          String
+  testCaseId         String?
+  name               String
+  inputJson          Json
+  expectedOutputJson Json
+  actualOutputJson   Json?
+  passed             Boolean
+  stdout             String?   @db.Text
+  stderr             String?   @db.Text
+  errorMessage       String?   @db.Text
+  runtimeMs          Int?
+  createdAt          DateTime  @default(now())
+  codeRun            CodeRun   @relation(fields: [codeRunId], references: [id], onDelete: Cascade)
+  testCase           TestCase? @relation(fields: [testCaseId], references: [id], onDelete: SetNull)
+
+  @@index([codeRunId])
+  @@index([testCaseId])
+  @@index([createdAt])
+}
+
+model DebugInsight {
+  id               String          @id @default(cuid())
+  userProfileId    String
+  codeRunId        String
+  attemptId        String?
+  interviewRoundId String?
+  summary          String          @db.Text
+  likelyCause      String          @db.Text
+  suggestedFix     String          @db.Text
+  followUpQuestion String?         @db.Text
+  createdAt        DateTime        @default(now())
+  userProfile      UserProfile     @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  codeRun          CodeRun         @relation(fields: [codeRunId], references: [id], onDelete: Cascade)
+  attempt          Attempt?        @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  interviewRound   InterviewRound? @relation(fields: [interviewRoundId], references: [id], onDelete: SetNull)
+
+  @@index([userProfileId])
+  @@index([codeRunId])
+  @@index([attemptId])
+  @@index([interviewRoundId])
+  @@index([createdAt])
 }
 
 model InterviewMessage {

@@ -35,10 +35,6 @@ function validateAIReviewInput(input: RequestAIReviewInput): string | null {
     return "Attempt ID is required.";
   }
 
-  if (!input.userCode.trim() && !input.userExplanation.trim()) {
-    return "Paste code or an explanation before requesting AI review.";
-  }
-
   if (input.userCode.length > MAX_USER_CODE_LENGTH) {
     return `Code is too long for one AI review. Keep it under ${MAX_USER_CODE_LENGTH.toLocaleString()} characters.`;
   }

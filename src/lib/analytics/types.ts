@@ -136,6 +136,24 @@ export type InterviewReadinessPerformance = {
   recommendedNextMock: RecommendedNextMock;
 };
 
+export type CodeExecutionPatternSignal = {
+  patternId: string;
+  patternName: string;
+  count: number;
+};
+
+export type CodeExecutionMetrics = {
+  totalCodeSubmissions: number;
+  totalCodeRuns: number;
+  customTestPassRate: number;
+  runtimeErrorRate: number;
+  timeoutRate: number;
+  averageTestsPerRun: number;
+  problemsWithSuccessfulSelfTests: number;
+  patternsWithRuntimeErrors: CodeExecutionPatternSignal[];
+  patternsWithRepeatedFailedTests: CodeExecutionPatternSignal[];
+};
+
 export type ReadinessPatternSectionItem = PatternMetric & {
   reason: string;
 };
@@ -161,4 +179,5 @@ export type ReadinessReport = {
   patternsNeedingReview: ReadinessPatternSectionItem[];
   recommendedNextSevenDays: ReadinessNextSevenDay[];
   interviewPerformance: InterviewReadinessPerformance;
+  codeExecution: CodeExecutionMetrics;
 };

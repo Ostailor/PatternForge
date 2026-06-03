@@ -2,9 +2,13 @@ import "server-only";
 
 import { Prisma } from "@/generated/prisma/client";
 import type { RecommendationFeedbackType } from "@/generated/prisma/enums";
+import { getCodeExecutionMetrics } from "@/lib/analytics/codeExecutionMetrics";
 import { getPatternConfusions } from "@/lib/analytics/confusionMetrics";
 import { getPatternMetrics } from "@/lib/analytics/patternMetrics";
-import type { PatternMetric } from "@/lib/analytics/types";
+import type {
+  CodeExecutionMetrics,
+  PatternMetric,
+} from "@/lib/analytics/types";
 import { getPrisma } from "@/lib/prisma";
 import {
   applyRecommendationFeedbackPersonalization,
@@ -27,12 +31,17 @@ import {
   buildActiveInterviewRecommendation,
   buildConfusionRecommendation,
   buildDailyForgeRecommendation,
+  buildDebugDrillRecommendation,
+  buildExplanationPracticeRecommendation,
   buildDueReviewRecommendation,
   buildFailedBattleRecommendation,
   buildFocusedInterviewRecommendation,
+  buildImplementationPracticeRecommendation,
   buildLearningPlanStepRecommendation,
   buildMockInterviewRecommendation,
   buildReadyForBossRecommendation,
+  buildSuccessfulSelfTestsRecommendation,
+  buildTestingPracticeRecommendation,
   buildWeaknessRepairInterviewRecommendation,
   buildWeakPatternRecommendation,
 } from "./insightGenerator";
@@ -53,6 +62,10 @@ const DEFAULT_RECOMMENDATION_TTL_HOURS = 24;
 const RECENT_INTERVIEW_DAYS = 21;
 const RECENT_FAILED_BATTLE_DAYS = 14;
 const ENOUGH_PRACTICE_ATTEMPTS = 3;
+const LOW_TESTS_PER_RUN_THRESHOLD = 1.5;
+const STRONG_RECOGNITION_THRESHOLD = 75;
+const HIGH_MASTERY_THRESHOLD = 76;
+const REPEATED_RUNTIME_ERROR_THRESHOLD = 2;
 
 type RecommendationStatusUpdateResult =
   | { status: "updated"; recommendationId: string }
@@ -91,6 +104,51 @@ function getPatternName(
   }
 
   return patternMetrics.find((metric) => metric.patternId === patternId)?.patternName;
+}
+
+async function getLatestCodeProblemForPattern({
+  userProfileId,
+  patternId,
+}: {
+  userProfileId: string;
+  patternId?: string;
+}): Promise<string | undefined> {
+  if (!patternId) {
+    const latestSubmission = await getPrisma().codeSubmission.findFirst({
+      where: {
+        userProfileId,
+      },
+      select: {
+        problemId: true,
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    });
+
+    return latestSubmission?.problemId;
+  }
+
+  const latestSubmission = await getPrisma().codeSubmission.findFirst({
+    where: {
+      userProfileId,
+      problem: {
+        problemPatterns: {
+          some: {
+            patternId,
+          },
+        },
+      },
+    },
+    select: {
+      problemId: true,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+  });
+
+  return latestSubmission?.problemId;
 }
 
 function getFallbackPattern(patternMetrics: PatternMetric[]): PatternMetric | null {
@@ -349,6 +407,186 @@ function getReadyForBossRecommendation(
         patternName: readyPattern.patternName,
       })
     : null;
+}
+
+async function getExplanationPracticeRecommendation(
+  userProfileId: string,
+): Promise<RecommendationCandidate | null> {
+  const submission = await getPrisma().codeSubmission.findFirst({
+    where: {
+      userProfileId,
+      attemptId: {
+        not: null,
+      },
+      codeRuns: {
+        some: {
+          testResults: {
+            some: {},
+            every: {
+              passed: true,
+            },
+          },
+        },
+      },
+      attempt: {
+        aiReviews: {
+          some: {
+            explanationScore: {
+              lt: 70,
+            },
+          },
+        },
+      },
+    },
+    select: {
+      problemId: true,
+      attempt: {
+        select: {
+          aiReviews: {
+            select: {
+              patternId: true,
+              explanationScore: true,
+              pattern: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+            take: 1,
+          },
+        },
+      },
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+  });
+  const review = submission?.attempt?.aiReviews[0];
+
+  if (!submission || !review) {
+    return null;
+  }
+
+  return buildExplanationPracticeRecommendation({
+    patternId: review.patternId,
+    patternName: review.pattern.name,
+    problemId: submission.problemId,
+    explanationScore: review.explanationScore,
+  });
+}
+
+async function getCodeExecutionRecommendations({
+  userProfileId,
+  patternMetrics,
+  codeExecution,
+}: {
+  userProfileId: string;
+  patternMetrics: PatternMetric[];
+  codeExecution: CodeExecutionMetrics;
+}): Promise<RecommendationCandidate[]> {
+  if (
+    codeExecution.totalCodeSubmissions === 0 &&
+    codeExecution.totalCodeRuns === 0
+  ) {
+    return [];
+  }
+
+  const recommendations: Array<RecommendationCandidate | null> = [];
+  const repeatedRuntimeErrorPattern =
+    codeExecution.patternsWithRuntimeErrors.find(
+      (pattern) => pattern.count >= REPEATED_RUNTIME_ERROR_THRESHOLD,
+    ) ?? null;
+
+  if (repeatedRuntimeErrorPattern) {
+    recommendations.push(
+      buildDebugDrillRecommendation({
+        patternId: repeatedRuntimeErrorPattern.patternId,
+        patternName: repeatedRuntimeErrorPattern.patternName,
+        problemId: await getLatestCodeProblemForPattern({
+          userProfileId,
+          patternId: repeatedRuntimeErrorPattern.patternId,
+        }),
+        runtimeErrorCount: repeatedRuntimeErrorPattern.count,
+      }),
+    );
+  }
+
+  if (
+    codeExecution.totalCodeRuns >= 2 &&
+    codeExecution.averageTestsPerRun < LOW_TESTS_PER_RUN_THRESHOLD
+  ) {
+    recommendations.push(
+      buildTestingPracticeRecommendation({
+        problemId: await getLatestCodeProblemForPattern({ userProfileId }),
+        averageTestsPerRun: codeExecution.averageTestsPerRun,
+        totalCodeRuns: codeExecution.totalCodeRuns,
+      }),
+    );
+  }
+
+  const implementationPattern = codeExecution.patternsWithRepeatedFailedTests
+    .map((pattern) => ({
+      executionSignal: pattern,
+      masterySignal: patternMetrics.find(
+        (metric) => metric.patternId === pattern.patternId,
+      ),
+    }))
+    .find(
+      ({ masterySignal }) =>
+        (masterySignal?.recognitionAccuracy ?? 0) >= STRONG_RECOGNITION_THRESHOLD,
+    );
+
+  if (implementationPattern) {
+    recommendations.push(
+      buildImplementationPracticeRecommendation({
+        patternId: implementationPattern.executionSignal.patternId,
+        patternName: implementationPattern.executionSignal.patternName,
+        problemId: await getLatestCodeProblemForPattern({
+          userProfileId,
+          patternId: implementationPattern.executionSignal.patternId,
+        }),
+        failedRunCount: implementationPattern.executionSignal.count,
+        recognitionAccuracy:
+          implementationPattern.masterySignal?.recognitionAccuracy ?? 0,
+      }),
+    );
+  }
+
+  recommendations.push(await getExplanationPracticeRecommendation(userProfileId));
+
+  const highMasteryPattern = patternMetrics
+    .filter(
+      (metric) =>
+        metric.masteryScore >= HIGH_MASTERY_THRESHOLD &&
+        metric.recognitionAccuracy >= STRONG_RECOGNITION_THRESHOLD,
+    )
+    .sort(
+      (left, right) =>
+        right.masteryScore - left.masteryScore ||
+        right.recognitionAccuracy - left.recognitionAccuracy ||
+        left.patternName.localeCompare(right.patternName),
+    )[0];
+
+  if (
+    highMasteryPattern &&
+    codeExecution.problemsWithSuccessfulSelfTests > 0
+  ) {
+    recommendations.push(
+      buildSuccessfulSelfTestsRecommendation({
+        patternId: highMasteryPattern.patternId,
+        patternName: highMasteryPattern.patternName,
+        successfulProblemCount: codeExecution.problemsWithSuccessfulSelfTests,
+      }),
+    );
+  }
+
+  return recommendations.filter(
+    (recommendation): recommendation is RecommendationCandidate =>
+      recommendation !== null,
+  );
 }
 
 function average(values: number[]): number | null {
@@ -697,10 +935,11 @@ export async function generateRecommendations(
     return [];
   }
 
-  const [reviewStats, patternMetrics, feedbackProfile] = await Promise.all([
+  const [reviewStats, patternMetrics, feedbackProfile, codeExecution] = await Promise.all([
     getReviewStats(scopedUserProfileId),
     getPatternMetrics(scopedUserProfileId),
     getRecommendationFeedbackProfile(scopedUserProfileId),
+    getCodeExecutionMetrics(scopedUserProfileId),
   ]);
   const dueReviewRecommendation =
     reviewStats.totalDueCount >= DUE_REVIEW_THRESHOLD
@@ -717,6 +956,7 @@ export async function generateRecommendations(
     failedBattleRecommendation,
     learningPlanStepRecommendation,
     interviewReadinessRecommendation,
+    codeExecutionRecommendations,
     dailyForgeRecommendation,
   ] = await Promise.all([
     getActiveBattleRecommendation(scopedUserProfileId),
@@ -733,6 +973,11 @@ export async function generateRecommendations(
       userProfileId: scopedUserProfileId,
       patternMetrics,
       dueReviewCount: reviewStats.totalDueCount,
+    }),
+    getCodeExecutionRecommendations({
+      userProfileId: scopedUserProfileId,
+      patternMetrics,
+      codeExecution,
     }),
     getDailyForgeRecommendation({
       userProfileId: scopedUserProfileId,
@@ -751,6 +996,7 @@ export async function generateRecommendations(
       confusionRecommendation,
       failedBattleRecommendation,
       learningPlanStepRecommendation,
+      ...codeExecutionRecommendations,
       getReadyForBossRecommendation(patternMetrics),
       dailyForgeRecommendation,
     ]),

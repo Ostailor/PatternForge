@@ -102,6 +102,12 @@ function getRecommendationTypeLabel(type: RecommendationType): string {
       return "Weakness Repair Interview";
     case "DailyForge":
       return "Daily Forge";
+    case "DebugDrill":
+      return "Debug Drill";
+    case "TestingPractice":
+      return "Testing Practice";
+    case "ImplementationPractice":
+      return "Implementation Practice";
   }
 }
 
@@ -133,6 +139,12 @@ function getEstimatedMinutes(
       return 40;
     case "DailyForge":
       return 35;
+    case "DebugDrill":
+      return 25;
+    case "TestingPractice":
+      return 20;
+    case "ImplementationPractice":
+      return 30;
     case "FocusPattern":
     case "RetryProblem":
     case "AIReviewFollowUp":
@@ -186,6 +198,32 @@ function getPrimaryCta(recommendation: SavedRecommendationForDashboard): {
         : { label: "Start Plan Step", href: "/forge" };
     case "DailyForge":
       return { label: "Start Daily Forge", href: "/forge" };
+    case "DebugDrill":
+      return recommendation.problemId
+        ? {
+            label: "Open Workspace",
+            href: `/problems/${recommendation.problemId}/workspace?mode=Practice`,
+          }
+        : { label: "Open Code History", href: "/code/history" };
+    case "TestingPractice":
+      return recommendation.problemId
+        ? {
+            label: "Write Custom Tests",
+            href: `/problems/${recommendation.problemId}/workspace?mode=Practice`,
+          }
+        : { label: "Open Code History", href: "/code/history" };
+    case "ImplementationPractice":
+      return recommendation.problemId
+        ? {
+            label: "Practice Implementation",
+            href: `/problems/${recommendation.problemId}/workspace?mode=Practice`,
+          }
+        : {
+            label: "Start Implementation Practice",
+            href: recommendation.targetPatternId
+              ? `/forge?pattern=${recommendation.targetPatternId}`
+              : "/forge",
+          };
     case "RetryProblem":
       return recommendation.problemId
         ? {
@@ -212,6 +250,17 @@ function getPrimaryCta(recommendation: SavedRecommendationForDashboard): {
 function getSecondaryCta(
   recommendation: SavedRecommendationForDashboard,
 ): DashboardRecommendation["secondaryCta"] {
+  if (
+    recommendation.recommendationType === "DebugDrill" ||
+    recommendation.recommendationType === "TestingPractice" ||
+    recommendation.recommendationType === "ImplementationPractice"
+  ) {
+    return {
+      label: "Code History",
+      href: "/code/history",
+    };
+  }
+
   if (recommendation.problemId && recommendation.recommendationType !== "RetryProblem") {
     return {
       label: "Open Problem",

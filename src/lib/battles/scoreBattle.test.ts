@@ -44,3 +44,18 @@ test("scoreBattle returns defeat below partial-victory thresholds", () => {
   assert.equal(score.result, "Defeat");
   assert.equal(score.xpEarned, 35);
 });
+
+test("scoreBattle adds optional custom test execution bonuses", () => {
+  const score = scoreBattle([
+    {
+      wasPatternCorrect: true,
+      solvedStatus: "Solved",
+      hasSuccessfulCustomTestRun: true,
+      allUserCustomTestsPassed: true,
+      userCreatedTestCount: 2,
+    },
+  ]);
+
+  assert.equal(score.executionBonusXp, 25);
+  assert.equal(score.xpEarned, 125);
+});

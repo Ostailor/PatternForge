@@ -44,6 +44,7 @@ export function buildReviewSolutionMessages(
         "explanationScore should reflect clarity and whether the user can explain the approach in interview terms.",
         "If userCode is missing, review the explanation and reflection instead and clearly note that implementation confidence is limited.",
         "If userExplanation is missing, review the code and reflection instead and clearly note that explanation confidence is limited.",
+        "If codeExecution is present, use its run status, failed custom test summaries, stdout, stderr, and runtime error as evidence, but describe it only as PatternForge custom test or self-test evidence.",
         "If the user selected the wrong pattern, explain the difference between the selected pattern and the correct pattern.",
         "If the implementation seems incomplete, say so honestly.",
         "Do not pretend to run code. Do not claim the code passes all tests unless execution actually happened.",

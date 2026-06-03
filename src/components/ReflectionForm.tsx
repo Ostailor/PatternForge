@@ -10,12 +10,14 @@ import { notifyAccountProgressChanged } from "@/lib/use-auth-progress";
 type ReflectionFormProps = {
   problem: Problem;
   selectedPatternId: string;
+  codeSubmissionId?: string;
   onSaved?: (attempt: Attempt) => void;
 };
 
 export default function ReflectionForm({
   problem,
   selectedPatternId,
+  codeSubmissionId,
   onSaved,
 }: ReflectionFormProps) {
   const { isLoaded, isSignedIn } = useAuth();
@@ -50,6 +52,7 @@ export default function ReflectionForm({
       timeSpentMinutes,
       confidence,
       reflection,
+      codeSubmissionId,
     };
 
     const result = await saveAttemptAction(attempt);

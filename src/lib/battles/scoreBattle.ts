@@ -4,6 +4,9 @@ import { calculateBattleXp } from "@/lib/game/xp";
 export type BattleScoringRound = {
   wasPatternCorrect: boolean;
   solvedStatus: string;
+  hasSuccessfulCustomTestRun?: boolean;
+  allUserCustomTestsPassed?: boolean;
+  userCreatedTestCount?: number;
 };
 
 export type BattleScore = {
@@ -13,6 +16,7 @@ export type BattleScore = {
   partiallySolvedRoundCount: number;
   correctRecognitionCount: number;
   completedOrPartialCount: number;
+  executionBonusXp: number;
   xpEarned: number;
 };
 
@@ -50,6 +54,21 @@ export function scoreBattle(rounds: BattleScoringRound[]): BattleScore {
       : recognitionAccuracy >= 0.5 || solveCompletionRate >= 0.5
         ? "PartialVictory"
         : "Defeat";
+  const executionBonusXp =
+    (rounds.some((round) => round.hasSuccessfulCustomTestRun) ? 10 : 0) +
+    (rounds.some((round) => round.allUserCustomTestsPassed) ? 10 : 0) +
+    (rounds.reduce(
+      (total, round) => total + (round.userCreatedTestCount ?? 0),
+      0,
+    ) >= 2
+      ? 5
+      : 0);
+  const baseXp = calculateBattleXp({
+    result,
+    correctRecognitionCount,
+    solvedProblemCount: solvedRoundCount,
+    partiallySolvedProblemCount: partiallySolvedRoundCount,
+  });
 
   return {
     result,
@@ -58,11 +77,7 @@ export function scoreBattle(rounds: BattleScoringRound[]): BattleScore {
     partiallySolvedRoundCount,
     correctRecognitionCount,
     completedOrPartialCount,
-    xpEarned: calculateBattleXp({
-      result,
-      correctRecognitionCount,
-      solvedProblemCount: solvedRoundCount,
-      partiallySolvedProblemCount: partiallySolvedRoundCount,
-    }),
+    executionBonusXp,
+    xpEarned: baseXp + executionBonusXp,
   };
 }

@@ -2,14 +2,23 @@ import { SignInButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { CodeWorkspace } from "@/components/code-workspace";
+import type {
+  DebugInsightView,
+  WorkspaceContext,
+  WorkspaceSubmissionHistoryItem,
+  WorkspaceTestCaseItem,
+} from "@/components/code-workspace/types";
 import ProgressBar from "@/components/ProgressBar";
 import { patterns } from "@/data/patterns";
+import { TestCaseSource } from "@/generated/prisma/client";
 import type {
   InterviewPhase,
   InterviewResult,
   InterviewType,
   RubricCategory,
 } from "@/generated/prisma/enums";
+import { getRunnerConfig } from "@/lib/code-runner/runnerConfig";
 import { getPrisma } from "@/lib/prisma";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 
@@ -29,6 +38,13 @@ type InterviewForRunner = NonNullable<
 >;
 type InterviewRoundForRunner = InterviewForRunner["rounds"][number];
 type InterviewMessageForRunner = InterviewForRunner["messages"][number];
+
+type InterviewWorkspaceData = {
+  runnerConfigured: boolean;
+  initialHistory: WorkspaceSubmissionHistoryItem[];
+  initialTestCases: WorkspaceTestCaseItem[];
+  initialDebugInsight: DebugInsightView | null;
+};
 
 const phaseOrder: InterviewPhase[] = [
   "Setup",
@@ -172,9 +188,9 @@ function getPhaseInstructions(phase: InterviewPhase): string {
     case "Approach":
       return "Describe the high-level plan, data structures, and invariant before implementation.";
     case "Implementation":
-      return "Paste code or implementation notes. PatternForge does not execute code in this flow.";
+      return "Write code in the workspace or paste implementation notes. Running custom self-tests is optional.";
     case "Testing":
-      return "List test cases and edge cases you would run. Do not mark them passing unless you actually ran them elsewhere.";
+      return "Run custom tests if useful, then explain cases, failures, and any fixes you made.";
     case "Complexity":
       return "State time and space complexity and tie them to the operations in your approach.";
     case "Feedback":
@@ -212,6 +228,10 @@ function getInitialSecondsRemaining(interview: InterviewForRunner) {
   );
 
   return interview.durationMinutes * 60 - elapsedSeconds;
+}
+
+function shouldShowWorkspace(phase: InterviewPhase): boolean {
+  return phase === "Implementation" || phase === "Testing";
 }
 
 async function getInterviewForRunner(
@@ -264,6 +284,182 @@ async function getInterviewForRunner(
   });
 }
 
+async function getRunnerConfigSafely(problemId: string) {
+  try {
+    return await getRunnerConfig(problemId, "Python");
+  } catch {
+    return null;
+  }
+}
+
+async function getInterviewSubmissionHistory({
+  userProfileId,
+  problemId,
+  interviewRoundId,
+}: {
+  userProfileId: string;
+  problemId: string;
+  interviewRoundId: string;
+}): Promise<WorkspaceSubmissionHistoryItem[]> {
+  try {
+    const submissions = await getPrisma().codeSubmission.findMany({
+      where: {
+        userProfileId,
+        problemId,
+        interviewRoundId,
+      },
+      include: {
+        codeRuns: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 1,
+        },
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+      take: 8,
+    });
+
+    return submissions.map((submission) => ({
+      id: submission.id,
+      language: "Python",
+      status: submission.status,
+      createdAt: submission.createdAt.toISOString(),
+      updatedAt: submission.updatedAt.toISOString(),
+      runCount: submission.codeRuns.length,
+      latestRunStatus: submission.codeRuns[0]?.status ?? null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function getInterviewTestCases({
+  userProfileId,
+  problemId,
+}: {
+  userProfileId: string;
+  problemId: string;
+}): Promise<WorkspaceTestCaseItem[]> {
+  try {
+    const testCases = await getPrisma().testCase.findMany({
+      where: {
+        problemId,
+        OR: [
+          {
+            source: TestCaseSource.PatternForge,
+            isPublic: true,
+          },
+          {
+            source: TestCaseSource.User,
+            userProfileId,
+          },
+        ],
+      },
+      orderBy: [
+        {
+          source: "asc",
+        },
+        {
+          createdAt: "desc",
+        },
+      ],
+      take: 10,
+    });
+
+    return testCases.map((testCase) => ({
+      id: testCase.id,
+      source: testCase.source,
+      name: testCase.name,
+      inputJson: testCase.inputJson,
+      expectedOutputJson: testCase.expectedOutputJson,
+      isPublic: testCase.isPublic,
+      createdAt: testCase.createdAt.toISOString(),
+      updatedAt: testCase.updatedAt.toISOString(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function getLatestInterviewDebugInsight({
+  userProfileId,
+  problemId,
+  interviewRoundId,
+}: {
+  userProfileId: string;
+  problemId: string;
+  interviewRoundId: string;
+}): Promise<DebugInsightView | null> {
+  try {
+    const insight = await getPrisma().debugInsight.findFirst({
+      where: {
+        userProfileId,
+        interviewRoundId,
+        codeRun: {
+          codeSubmission: {
+            problemId,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return insight
+      ? {
+          id: insight.id,
+          summary: insight.summary,
+          likelyCause: insight.likelyCause,
+          suggestedFix: insight.suggestedFix,
+          followUpQuestion: insight.followUpQuestion,
+          createdAt: insight.createdAt.toISOString(),
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getInterviewWorkspaceData({
+  userProfileId,
+  problemId,
+  interviewRoundId,
+}: {
+  userProfileId: string;
+  problemId: string;
+  interviewRoundId: string;
+}): Promise<InterviewWorkspaceData> {
+  const [runnerConfig, initialHistory, initialTestCases, initialDebugInsight] =
+    await Promise.all([
+      getRunnerConfigSafely(problemId),
+      getInterviewSubmissionHistory({
+        userProfileId,
+        problemId,
+        interviewRoundId,
+      }),
+      getInterviewTestCases({
+        userProfileId,
+        problemId,
+      }),
+      getLatestInterviewDebugInsight({
+        userProfileId,
+        problemId,
+        interviewRoundId,
+      }),
+    ]);
+
+  return {
+    runnerConfigured: Boolean(runnerConfig),
+    initialHistory,
+    initialTestCases,
+    initialDebugInsight,
+  };
+}
+
 export default async function InterviewRunnerPage({
   params,
   searchParams,
@@ -296,6 +492,14 @@ export default async function InterviewRunnerPage({
   const currentPhase = getCurrentPhase(interview, currentRound);
   const roundProgress = getRoundProgress(interview);
   const error = getSingleSearchParam(resolvedSearchParams, "error");
+  const workspaceData =
+    currentRound && shouldShowWorkspace(currentPhase)
+      ? await getInterviewWorkspaceData({
+          userProfileId: userProfile.id,
+          problemId: currentRound.problemId,
+          interviewRoundId: currentRound.id,
+        })
+      : null;
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -373,6 +577,14 @@ export default async function InterviewRunnerPage({
               currentPhase={currentPhase}
             />
           </div>
+          {currentRound && workspaceData ? (
+            <InterviewCodeWorkspacePanel
+              interviewId={interview.id}
+              round={currentRound}
+              currentPhase={currentPhase}
+              workspaceData={workspaceData}
+            />
+          ) : null}
         </div>
       </section>
     </main>
@@ -632,11 +844,67 @@ function PhaseInputPanel({
         <input type="hidden" name="roundId" value={currentRound.id} />
         <input type="hidden" name="phase" value={currentPhase} />
         <PhaseFields round={currentRound} currentPhase={currentPhase} />
+        {currentPhase === "Implementation" ? (
+          <Link
+            href={`/problems/${currentRound.problemId}/workspace?mode=Interview&interviewId=${interview.id}&interviewRoundId=${currentRound.id}`}
+            className="inline-flex rounded-lg border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            Open full Code Workspace
+          </Link>
+        ) : null}
         <button className="rounded-lg bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-teal-700">
           Continue
         </button>
       </form>
     </section>
+  );
+}
+
+function InterviewCodeWorkspacePanel({
+  interviewId,
+  round,
+  currentPhase,
+  workspaceData,
+}: {
+  interviewId: string;
+  round: InterviewRoundForRunner;
+  currentPhase: InterviewPhase;
+  workspaceData: InterviewWorkspaceData;
+}) {
+  const context: WorkspaceContext = {
+    mode: "Interview",
+    interviewRoundId: round.id,
+    returnHref: `/interviews/${interviewId}`,
+    returnLabel: "Back to Interview",
+  };
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+          Code Workspace
+        </p>
+        <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+          {currentPhase === "Testing"
+            ? "Run custom tests"
+            : "Implement in Python"}
+        </h2>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+          Code execution is optional for v0.7. Runs are saved to this interview
+          round and used as custom self-test evidence during scoring.
+        </p>
+      </section>
+      <CodeWorkspace
+        problem={round.problem}
+        context={context}
+        runnerConfigured={workspaceData.runnerConfigured}
+        initialHistory={workspaceData.initialHistory}
+        initialTestCases={workspaceData.initialTestCases}
+        initialDebugInsight={workspaceData.initialDebugInsight}
+        isAuthenticated
+        embedded
+      />
+    </div>
   );
 }
 
@@ -707,7 +975,7 @@ function PhaseFields({
         <TextAreaField
           name="codeText"
           label="Code or implementation notes"
-          placeholder="Paste code or write implementation notes. This flow does not execute code."
+          placeholder="Paste code, summarize what you wrote in the workspace, or record implementation notes."
           defaultValue={round.codeText ?? ""}
           minHeightClass="min-h-72"
         />
@@ -717,7 +985,7 @@ function PhaseFields({
         <TextAreaField
           name="testCasesText"
           label="Test cases and edge cases"
-          placeholder="List normal cases, edge cases, and what each should verify. Only say a test passed if you actually ran it elsewhere."
+          placeholder="List normal cases, edge cases, failed cases you observed, and what you changed after a failed custom run."
           defaultValue={round.testCasesText ?? ""}
         />
       );

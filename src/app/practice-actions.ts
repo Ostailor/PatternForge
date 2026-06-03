@@ -15,6 +15,7 @@ export type SaveAttemptInput = {
   timeSpentMinutes: number;
   confidence: Confidence;
   reflection: string;
+  codeSubmissionId?: string;
 };
 
 export type LegacyAttemptImportInput = SaveAttemptInput & {
@@ -85,6 +86,7 @@ export async function saveAttemptAction(
       timeSpentMinutes: input.timeSpentMinutes,
       confidence: input.confidence,
       reflection: input.reflection.trim(),
+      codeSubmissionId: input.codeSubmissionId,
     });
 
     if (!attempt) {

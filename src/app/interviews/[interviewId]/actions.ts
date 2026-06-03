@@ -9,6 +9,7 @@ import type { InterviewPhase, RubricCategory } from "@/generated/prisma/enums";
 import { patterns } from "@/data/patterns";
 import { requestAIInterviewerResponse } from "@/lib/ai/interviewer";
 import { scoreInterview } from "@/lib/ai/scoreInterview";
+import type { ScoreInterviewCodeExecution } from "@/lib/ai/scoreInterview";
 import type {
   AIInterviewMessageInput,
   AIInterviewerInput,
@@ -49,6 +50,32 @@ type RoundForScoring = {
   codeText: string | null;
   testCasesText: string | null;
   complexityText: string | null;
+  debugInsights?: {
+    id: string;
+  }[];
+  codeSubmissions?: {
+    id: string;
+    codeRuns: {
+      id: string;
+      status: string;
+      stdout: string;
+      stderr: string;
+      errorMessage: string | null;
+      runtimeMs: number | null;
+      createdAt: Date;
+      testResults: {
+        name: string;
+        inputJson: unknown;
+        expectedOutputJson: unknown;
+        actualOutputJson: unknown;
+        passed: boolean;
+        errorMessage: string | null;
+        testCase: {
+          source: string;
+        } | null;
+      }[];
+    }[];
+  }[];
 };
 
 type InterviewForFinalization = {
@@ -141,6 +168,59 @@ function requireText(value: string, message: string): string {
   return value.trim();
 }
 
+async function hasInterviewRoundCodeSubmission({
+  tx,
+  userProfileId,
+  problemId,
+  interviewRoundId,
+}: {
+  tx: Prisma.TransactionClient;
+  userProfileId: string;
+  problemId: string;
+  interviewRoundId: string;
+}): Promise<boolean> {
+  const submission = await tx.codeSubmission.findFirst({
+    where: {
+      userProfileId,
+      problemId,
+      interviewRoundId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  return Boolean(submission);
+}
+
+async function hasInterviewRoundCodeRun({
+  tx,
+  userProfileId,
+  problemId,
+  interviewRoundId,
+}: {
+  tx: Prisma.TransactionClient;
+  userProfileId: string;
+  problemId: string;
+  interviewRoundId: string;
+}): Promise<boolean> {
+  const run = await tx.codeRun.findFirst({
+    where: {
+      userProfileId,
+      codeSubmission: {
+        userProfileId,
+        problemId,
+        interviewRoundId,
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  return Boolean(run);
+}
+
 function getPatternName(patternId: string | null): string {
   return patterns.find((pattern) => pattern.id === patternId)?.name ?? "Unknown";
 }
@@ -210,6 +290,60 @@ function buildAttemptReflection({
     `Testing:\n${round.testCasesText ?? "Not recorded"}`,
     `Complexity:\n${round.complexityText ?? "Not recorded"}`,
   ].join("\n\n");
+}
+
+function isUnsuccessfulRun(status: string): boolean {
+  return status !== "Succeeded";
+}
+
+function buildRoundCodeExecution(
+  round: RoundForScoring,
+): ScoreInterviewCodeExecution | null {
+  const runs = (round.codeSubmissions ?? [])
+    .flatMap((submission) => submission.codeRuns)
+    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+  const latestRun = runs.at(-1);
+
+  if (!latestRun) {
+    return null;
+  }
+
+  const failedTestResults = latestRun.testResults.filter(
+    (testResult) => !testResult.passed,
+  );
+  const successfulRunCount = runs.filter((run) => run.status === "Succeeded").length;
+  const failedRunCount = runs.filter((run) => isUnsuccessfulRun(run.status)).length;
+  const firstFailedRunIndex = runs.findIndex((run) => isUnsuccessfulRun(run.status));
+  const fixedAfterFailedRun =
+    firstFailedRunIndex >= 0 &&
+    runs
+      .slice(firstFailedRunIndex + 1)
+      .some((run) => run.status === "Succeeded");
+
+  return {
+    didRun: true,
+    latestRunStatus: latestRun.status,
+    runtimeMs: latestRun.runtimeMs,
+    totalTests: latestRun.testResults.length,
+    testsPassed: latestRun.testResults.length - failedTestResults.length,
+    testsFailed: failedTestResults.length,
+    successfulRunCount,
+    failedRunCount,
+    userCreatedTestCount: latestRun.testResults.filter(
+      (testResult) => testResult.testCase?.source === "User",
+    ).length,
+    fixedAfterFailedRun,
+    stdout: latestRun.stdout,
+    stderr: latestRun.stderr,
+    runtimeError: latestRun.errorMessage,
+    failedTestSummaries: failedTestResults.slice(0, 5).map((testResult) => ({
+      name: testResult.name,
+      inputJson: testResult.inputJson,
+      expectedOutputJson: testResult.expectedOutputJson,
+      actualOutputJson: testResult.actualOutputJson,
+      errorMessage: testResult.errorMessage,
+    })),
+  };
 }
 
 function buildAIInterviewerInput({
@@ -288,6 +422,7 @@ async function finalizeInterview({
       codeText: round.codeText,
       testCasesText: round.testCasesText,
       complexityText: round.complexityText,
+      codeExecution: buildRoundCodeExecution(round),
     })),
     messages: interview.messages.map(toAIMessageInput),
   });
@@ -457,7 +592,9 @@ async function finalizeInterview({
       role: "Interviewer",
       phase: "Feedback",
       content:
-        "Interview complete. Feedback and rubric scores are saved below. I did not execute your code or verify test pass/fail status.",
+        interview.rounds.some((round) => buildRoundCodeExecution(round))
+          ? "Interview complete. Feedback and rubric scores are saved below. I used PatternForge custom run output where it was available; this is not an official correctness result."
+          : "Interview complete. Feedback and rubric scores are saved below. Code was not run in PatternForge, so implementation confidence is limited.",
     },
   });
   await createGameEventWithClient(
@@ -721,10 +858,21 @@ export async function saveInterviewPhaseAction(formData: FormData) {
       }
 
       if (activePhase === "Implementation") {
-        const codeText = requireText(
-          readString(formData, "codeText"),
-          "Implementation notes or code are required.",
-        );
+        const savedCodeText = readString(formData, "codeText");
+        const hasWorkspaceCode = await hasInterviewRoundCodeSubmission({
+          tx,
+          userProfileId: userProfile.id,
+          problemId: activeRound.problemId,
+          interviewRoundId: activeRound.id,
+        });
+        const codeText =
+          savedCodeText ||
+          (hasWorkspaceCode
+            ? "Implemented in PatternForge Code Workspace."
+            : requireText(
+                savedCodeText,
+                "Implementation notes, code, or a saved workspace submission are required.",
+              ));
 
         const updatedRound = await tx.interviewRound.update({
           where: { id: activeRound.id },
@@ -760,10 +908,21 @@ export async function saveInterviewPhaseAction(formData: FormData) {
       }
 
       if (activePhase === "Testing") {
-        const testCasesText = requireText(
-          readString(formData, "testCasesText"),
-          "Test cases and edge cases are required.",
-        );
+        const savedTestCasesText = readString(formData, "testCasesText");
+        const hasWorkspaceRun = await hasInterviewRoundCodeRun({
+          tx,
+          userProfileId: userProfile.id,
+          problemId: activeRound.problemId,
+          interviewRoundId: activeRound.id,
+        });
+        const testCasesText =
+          savedTestCasesText ||
+          (hasWorkspaceRun
+            ? "Custom tests were run in PatternForge Code Workspace."
+            : requireText(
+                savedTestCasesText,
+                "Test cases, edge cases, or a saved workspace run are required.",
+              ));
 
         const updatedRound = await tx.interviewRound.update({
           where: { id: activeRound.id },
@@ -947,6 +1106,34 @@ export async function saveInterviewPhaseAction(formData: FormData) {
                   },
                 },
                 messages: true,
+                debugInsights: {
+                  select: {
+                    id: true,
+                  },
+                },
+                codeSubmissions: {
+                  include: {
+                    codeRuns: {
+                      orderBy: {
+                        createdAt: "asc",
+                      },
+                      include: {
+                        testResults: {
+                          orderBy: {
+                            createdAt: "asc",
+                          },
+                          include: {
+                            testCase: {
+                              select: {
+                                source: true,
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
               },
               orderBy: {
                 roundNumber: "asc",

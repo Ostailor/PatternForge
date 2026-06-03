@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type {
+  CodeExecutionPatternSignal,
   InterviewMissedPattern,
   InterviewMissedSignal,
   InterviewRubricBreakdownItem,
@@ -179,9 +180,9 @@ export default async function ReadinessPage() {
             <p className="mt-4 max-w-3xl text-sm font-semibold leading-6 text-slate-300">
               PatternForge estimates interview readiness from your attempts,
               pattern recognition, solve consistency, review retention, battle
-              outcomes, timed mock interviews, mistake recovery, and confidence.
-              It is a training signal, not a promise or guarantee of interview
-              outcomes.
+              outcomes, timed mock interviews, code execution signals, mistake
+              recovery, and confidence. It is a training signal, not a promise
+              or guarantee of interview outcomes.
             </p>
           </div>
           <div className="rounded-lg border border-white/10 bg-white/5 p-5">
@@ -227,7 +228,19 @@ export default async function ReadinessPage() {
           value={report.patternsNeedingReview.length}
           detail="Patterns with retention risk"
         />
+        <MetricTile
+          label="Code runs"
+          value={report.codeExecution.totalCodeRuns}
+          detail="Saved server-side runs"
+        />
+        <MetricTile
+          label="Self-test pass rate"
+          value={`${report.codeExecution.customTestPassRate}%`}
+          detail="Custom tests passed"
+        />
       </section>
+
+      <CodeExecutionSection report={report} />
 
       {report.interviewPerformance.completedCount === 0 ? (
         <FirstMockInterviewState />
@@ -321,6 +334,139 @@ function MetricTile({
         {value}
       </p>
       <p className="mt-2 text-sm font-semibold text-slate-600">{detail}</p>
+    </div>
+  );
+}
+
+function CodeExecutionSection({ report }: { report: ReadinessReport }) {
+  const metrics = report.codeExecution;
+  const runtimeStability = Math.max(
+    0,
+    100 - metrics.runtimeErrorRate - metrics.timeoutRate,
+  );
+
+  return (
+    <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+            Code Execution
+          </p>
+          <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+            Self-test and debugging signal
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
+            These metrics use PatternForge custom tests and server-side code
+            runs only. They do not imply official problem correctness.
+          </p>
+        </div>
+        <Link
+          href="/code/history"
+          className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600 transition hover:border-teal-200 hover:text-teal-700"
+        >
+          View Code History
+        </Link>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MiniMetric
+          label="Submissions"
+          value={metrics.totalCodeSubmissions}
+          detail="Saved workspace drafts"
+        />
+        <MiniMetric
+          label="Self-test pass rate"
+          value={`${metrics.customTestPassRate}%`}
+          detail="Custom test assertions passed"
+        />
+        <MiniMetric
+          label="Runtime stability"
+          value={`${runtimeStability}%`}
+          detail={`${metrics.runtimeErrorRate}% runtime errors, ${metrics.timeoutRate}% timeouts`}
+        />
+        <MiniMetric
+          label="Testing discipline"
+          value={metrics.averageTestsPerRun}
+          detail="Average tests per run"
+        />
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <DebugSignalCard
+          title="Successful self-tests"
+          value={metrics.problemsWithSuccessfulSelfTests}
+          detail="Problems with at least one run where custom tests passed."
+        />
+        <PatternSignalList
+          title="Runtime error patterns"
+          emptyText="No repeated runtime error pattern is visible yet."
+          patterns={metrics.patternsWithRuntimeErrors}
+        />
+        <PatternSignalList
+          title="Repeated failed tests"
+          emptyText="No pattern has repeated failed custom tests yet."
+          patterns={metrics.patternsWithRepeatedFailedTests}
+        />
+      </div>
+    </section>
+  );
+}
+
+function DebugSignalCard({
+  title,
+  value,
+  detail,
+}: {
+  title: string;
+  value: string | number;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+        {title}
+      </p>
+      <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+        {value}
+      </p>
+      <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+        {detail}
+      </p>
+    </div>
+  );
+}
+
+function PatternSignalList({
+  title,
+  emptyText,
+  patterns,
+}: {
+  title: string;
+  emptyText: string;
+  patterns: CodeExecutionPatternSignal[];
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+        {title}
+      </p>
+      {patterns.length === 0 ? (
+        <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
+          {emptyText}
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {patterns.map((pattern) => (
+            <Link
+              key={pattern.patternId}
+              href={`/patterns/${pattern.patternId}`}
+              className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+            >
+              {pattern.patternName} · {pattern.count}
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -82,6 +82,71 @@ relationships.
   recommendations.
 - Global loading, error, and not-found states.
 
+### v0.7
+
+- Code Workspace at `/problems/[problemId]/workspace`.
+- Reusable workspace components for practice, interview implementation rounds,
+  and boss battle rounds.
+- Python-only custom/self-test runner for the MVP.
+- Structured runner configs through `ProblemRunnerConfig`, with FreeRun mode
+  when a problem does not have structured metadata.
+- Custom test case builder with user-owned `TestCase` rows.
+- Saved `CodeSubmission`, `CodeRun`, and `TestResult` history.
+- Debug Coach that reviews failed custom runs and saves `DebugInsight` rows.
+- Code History page at `/code/history`.
+- Practice, interview, and battle integrations that link code to attempts,
+  interview rounds, and battle rounds.
+- Readiness and recommendation signals from code execution: self-test pass
+  rate, runtime stability, testing discipline, repeated runtime errors, and
+  failed custom tests.
+
+## Code Workspace Behavior
+
+The Code Workspace lets signed-in users write Python code for a PatternForge
+problem, create custom tests, run server-side custom tests, save code, inspect
+stdout/stderr/errors, and view previous submissions. Users who are not signed in
+can preview and type locally, but saving code, running code, storing tests, and
+using Debug Coach require authentication.
+
+Workspace context is optional but preserved when present:
+
+- Practice work can link to an `Attempt`.
+- Interview work can link to an `InterviewRound`.
+- Battle work can link to a `BattleRound`.
+
+The workspace shows the problem title, difficulty, official external link,
+current mode, editor, custom test builder, run results, submission history, and
+Debug Coach entry point after failed runs. It never displays copied problem
+statements or official examples.
+
+## Custom Test Runner Behavior
+
+PatternForge v0.7 starts with Python only. Structured mode calls a configured
+function using JSON test inputs and compares JSON-serializable output with the
+expected output. Unsupported languages, oversized code, oversized test payloads,
+unsupported run types, and too many tests are rejected before execution.
+
+When a problem has no runner config, the workspace switches to FreeRun mode and
+shows: "Structured tests are not configured for this problem yet. You can still
+run free-form Python code." FreeRun executes a full Python script and captures
+stdout, stderr, runtime, and errors without test assertions.
+
+All result copy uses PatternForge custom/self-test language. Passing custom
+tests is not an official correctness result and is not a LeetCode acceptance
+claim.
+
+## Debug Coach Behavior
+
+Debug Coach is available after failed custom runs, runtime errors, timeouts, or
+validation failures. It receives only PatternForge metadata, user-provided code,
+custom tests, stdout, stderr, runtime errors, and available attempt reflection.
+It saves a `DebugInsight` with summary, likely cause, suggested fix, and an
+optional follow-up question.
+
+Debug Coach does not scrape LeetCode, does not fetch official solutions, does
+not reveal hidden pattern information before the flow has revealed it, and does
+not claim code passes official tests.
+
 ## Interview Mode Behavior
 
 Interview sessions are authenticated, private, database-backed mock interviews.
@@ -121,8 +186,8 @@ The interviewer:
   Hypothesis is submitted.
 - Uses only PatternForge metadata and user-provided text/code.
 - Never copies, reconstructs, summarizes, or invents LeetCode statements.
-- Does not claim code passed tests unless execution evidence is supplied by the
-  user. PatternForge v0.6 does not execute code.
+- Describes code execution only as PatternForge custom tests or self-tests when
+  server-side execution evidence exists.
 - Falls back to deterministic interviewer prompts when the AI provider is
   unavailable or returns malformed JSON.
 
@@ -168,11 +233,20 @@ v0.6 adds interview recommendation types:
 - `FocusedInterview`
 - `WeaknessRepairInterview`
 
+v0.7 adds code-execution recommendation types:
+
+- `DebugDrill`
+- `TestingPractice`
+- `ImplementationPractice`
+
 The engine recommends interviews when readiness is high but no interviews are
 completed, weak patterns have enough practice history, multiple patterns have
 decent mastery, a recent boss battle failed, interview scores show explanation
-gaps, or interview practice is stale. Interview recommendations are not allowed
-to crowd out overdue review recommendations.
+gaps, or interview practice is stale. It recommends debugging/testing/
+implementation practice when code runs show repeated runtime errors, low custom
+test count, or strong recognition with failed custom tests. Interview and
+execution recommendations are not allowed to crowd out overdue review
+recommendations.
 
 ## Readiness Report
 
@@ -185,6 +259,14 @@ v0.6 readiness includes:
 - Rubric Breakdown.
 - Interview Weak Spots.
 - Recommended Next Mock.
+
+v0.7 readiness adds:
+
+- Code Execution section.
+- Self-test pass rate.
+- Runtime stability.
+- Testing discipline.
+- Debugging signals from runtime errors and repeated failed custom tests.
 
 Overall readiness now weighs pattern coverage, recognition, solve consistency,
 retention, boss battle performance, interview performance, mistake recovery,
@@ -238,6 +320,49 @@ The AI client also accepts `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and
 `OPENAI_MODEL` as fallbacks. Keep AI keys server-side only. Do not prefix AI
 keys with `NEXT_PUBLIC_`.
 
+Optional local Code Workspace variable:
+
+```text
+PATTERNFORGE_PYTHON_BIN="python3"
+```
+
+`PATTERNFORGE_PYTHON_BIN` is read by the server-side development runner only.
+It is never needed in the browser and must not be prefixed with `NEXT_PUBLIC_`.
+
+## Code Execution Security
+
+PatternForge v0.7 code execution is server-side only. Browser components call
+authenticated server actions, and saved code submissions, code runs, custom
+tests, and Debug Coach insights are always scoped to the current `UserProfile`.
+Users can only run code linked to attempts, interview rounds, and battle rounds
+they own.
+
+The local Python runner is a controlled MVP development path, not a production
+sandbox. It writes user code into a disposable temporary directory, launches
+Python with a minimal secret-free environment, applies strict code/input/test
+count/output/time limits, blocks unsupported languages, blocks common network
+and process-spawn paths, guards file access to the temporary run directory, and
+removes the temporary directory after the run. Runner errors are sanitized
+before being returned or saved.
+
+Production deployments must not run untrusted user code in the main app process
+or on the same host that has database, auth, or AI provider secrets. Production
+requires an isolated execution service such as a per-run container, microVM, or
+managed sandbox with:
+
+- No network egress by default.
+- No app, database, auth, or AI environment variables.
+- Disposable filesystem with no persistent host mounts.
+- Read-only runtime image except for a temporary work directory.
+- CPU, memory, process, file, and wall-clock limits.
+- Output and input caps matching or stricter than the app limits.
+- Structured result passing back to the app, not shell interpolation.
+
+The app intentionally reports PatternForge results as custom tests or self-tests
+only. It does not claim official LeetCode acceptance, does not submit to
+LeetCode, and does not scrape or store LeetCode problem statements or official
+examples.
+
 ## Database Setup
 
 Start PostgreSQL. One Docker option:
@@ -284,10 +409,11 @@ Validate the Prisma schema:
 npx prisma validate
 ```
 
-The v0.1-v0.6 migrations are additive. They add auth-backed progress, AI Coach,
+The v0.1-v0.7 migrations are additive. They add auth-backed progress, AI Coach,
 review scheduling, battles, recommendations, learning plans, contrast drills,
-interviews, interview rewards, and interview recommendations without deleting
-existing app data.
+interviews, interview rewards, interview recommendations, code workspace tables,
+test results, debug insights, and execution recommendation types without
+deleting existing app data.
 
 ## Seed Command
 
@@ -341,6 +467,35 @@ run `npm run dev -- -p 3100` or another open port.
 15. Try another user's interview ID while signed in as a different user and
     confirm the page returns not found.
 
+## How To Test Code Workspace
+
+1. Configure Clerk and PostgreSQL, then run migrations and seed data.
+2. Sign in.
+3. Open a problem workspace, for example
+   `/problems/two-sum/workspace?mode=Practice`.
+4. Confirm the page shows metadata, external link, Python editor, custom test
+   builder, run results panel, and submission history.
+5. Add a custom test with valid input JSON and expected output JSON.
+6. Save custom tests and confirm they reappear as user/custom tests, not
+   official examples.
+7. Write Python code and click Run custom tests.
+8. Confirm a `CodeSubmission`, `CodeRun`, and `TestResult` are saved, and the
+   results panel shows status, runtime, stdout, stderr, expected output, actual
+   output, and pass/fail per custom test.
+9. Create a failing run and use Debug Coach. Confirm a `DebugInsight` is saved
+   and can create a flashcard or mistake card when enough context exists.
+10. Open `/code/history` and confirm the submission appears with latest run
+    status, custom tests passed/failed, linked context, and workspace CTA.
+11. Complete a normal practice attempt after using the workspace and confirm
+    the saved code links to the created `Attempt`.
+12. Open an interview implementation phase and a battle round workspace and
+    confirm code saves with `InterviewRound` and `BattleRound` context.
+13. Try another user's code submission or run ID while signed in as a different
+    user and confirm the action is rejected or returns not found.
+14. Open `/readiness` and the dashboard to confirm execution signals and
+    debugging/testing/implementation recommendations appear without hiding due
+    reviews.
+
 ## Verification Commands
 
 ```bash
@@ -370,7 +525,7 @@ requires valid `DATABASE_URL` credentials and seeded problem/pattern data.
 
 ## Intentionally Excluded
 
-PatternForge v0.6 intentionally excludes:
+PatternForge intentionally excludes:
 
 - Live voice mode.
 - Video simulation.
@@ -380,15 +535,18 @@ PatternForge v0.6 intentionally excludes:
 - LeetCode scraping.
 - Copied LeetCode problem statements.
 - Automatic submission to LeetCode.
-- Code execution sandbox.
-- Claims that code passed tests unless tests were actually executed outside the
-  app and supplied by the user.
+- Official LeetCode execution or acceptance claims.
+- A production-grade code execution sandbox in the main Next.js process. The
+  local Python runner is development-only until an isolated executor is
+  configured.
 - Payments or subscriptions.
 - Public sharing of private progress.
 
 ## Known Limitations
 
-- v0.6 does not execute code.
+- v0.7 starts with Python-only custom/self-test execution.
+- Local code execution is development-only and must be replaced by an isolated
+  execution environment before public production use.
 - AI scoring is feedback, not a guarantee of correctness or hiring outcome.
 - Live AI requires server-side AI provider credentials. Without them,
   deterministic fallback interviewer and scoring logic is used.
@@ -399,16 +557,13 @@ PatternForge v0.6 intentionally excludes:
 
 ## Roadmap
 
-### v0.7 Voice Mode or Code Execution Sandbox
+### v0.8 Voice Mode
 
-- Option A: voice-mode interview practice with transcript persistence, staged
-  hints, and communication scoring.
-- Option B: code execution sandbox for supported languages, real test execution,
-  safer implementation scoring, and explicit pass/fail evidence.
-
-Recommended v0.7 scope: prioritize the code execution sandbox if scoring
-accuracy is the highest product risk; prioritize voice mode if communication
-practice is the highest user value.
+- Voice-mode interview practice.
+- Transcript persistence.
+- Staged interviewer hints.
+- Communication scoring from spoken answers.
+- Review cards from voice-session weaknesses.
 
 ### v1.0 Full Learning System
 
@@ -420,14 +575,15 @@ practice is the highest user value.
 - Production hardening for observability, rate limits, operational support, and
   evaluation of AI outputs.
 
-## Current v0.6 Summary
+## Current v0.7 Summary
 
-v0.6 adds Interview Mode, timed mock sessions, AI interviewer prompts,
-interview scoring, feedback persistence, interview-derived attempts, interview
-history, readiness/reporting integration, interview recommendations, XP events,
-and interview achievements.
+v0.7 adds the Code Workspace, Python custom runner, custom test persistence,
+code submissions, code runs, test results, Debug Coach, debug insights, code
+history, practice/interview/battle code links, readiness execution signals, and
+debugging/testing/implementation recommendations.
 
 To test it, configure auth and database credentials, run migrations and seed,
-sign in, complete a mock interview through every phase, then verify summary,
-history, readiness, dashboard events, recommendations, attempts, feedback,
-mistakes, flashcards, XP, and achievements.
+sign in, run the Code Workspace checklist, complete a mock interview through
+every phase, then verify summaries, history, readiness, dashboard events,
+recommendations, attempts, feedback, mistakes, flashcards, XP, achievements,
+submissions, runs, test results, and debug insights.

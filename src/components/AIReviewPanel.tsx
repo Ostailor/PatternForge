@@ -9,9 +9,13 @@ import type { Attempt } from "@/lib/types";
 
 type AIReviewPanelProps = {
   attempt: Attempt;
+  hasLinkedWorkspaceCode?: boolean;
 };
 
-export default function AIReviewPanel({ attempt }: AIReviewPanelProps) {
+export default function AIReviewPanel({
+  attempt,
+  hasLinkedWorkspaceCode = false,
+}: AIReviewPanelProps) {
   const [userCode, setUserCode] = useState("");
   const [userExplanation, setUserExplanation] = useState("");
   const [review, setReview] = useState<SavedAIReview | null>(null);
@@ -68,8 +72,8 @@ export default function AIReviewPanel({ attempt }: AIReviewPanelProps) {
             Forge feedback from your attempt
           </h2>
           <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-600">
-            Paste your solution, your explanation, or both. The coach grades
-            pattern sense, implementation shape, complexity, and retention.
+            Paste your solution, your explanation, or both. If you used the Code
+            Workspace, the coach can also use your latest linked code run.
           </p>
         </div>
         <StatusPill status={panelStatus} />
@@ -78,8 +82,14 @@ export default function AIReviewPanel({ attempt }: AIReviewPanelProps) {
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <CoachState label="Attempt saved" tone="teal" />
         <CoachState
-          label={hasCode ? "Code provided" : "No code provided"}
-          tone={hasCode ? "teal" : "slate"}
+          label={
+            hasCode
+              ? "Code provided"
+              : hasLinkedWorkspaceCode
+                ? "Workspace code linked"
+                : "No code provided"
+          }
+          tone={hasCode || hasLinkedWorkspaceCode ? "teal" : "slate"}
         />
         <CoachState
           label={
@@ -128,7 +138,8 @@ export default function AIReviewPanel({ attempt }: AIReviewPanelProps) {
               Not reviewed yet
             </p>
             <p className="mt-1 text-sm font-semibold leading-6 text-slate-500">
-              Add code, an explanation, or both to unlock a Coach Review.
+              Add code or explanation if you want to supplement the saved
+              attempt and any linked workspace run.
             </p>
           </div>
         ) : null}

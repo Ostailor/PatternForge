@@ -4,7 +4,12 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 import { patterns } from "../src/data/patterns";
 import { problems } from "../src/data/problems";
-import { Difficulty, PrismaClient } from "../src/generated/prisma/client";
+import {
+  CodeLanguage,
+  Difficulty,
+  PrismaClient,
+  type Prisma,
+} from "../src/generated/prisma/client";
 import { achievementDefinitions } from "../src/lib/achievements/definitions";
 import type { Problem as SeedProblem } from "../src/lib/types";
 
@@ -17,6 +22,79 @@ if (!connectionString) {
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString }),
 });
+
+const PYTHON_JSON_HARNESS_TEMPLATE = "patternforge-python-json-v1";
+
+const beginnerRunnerConfigs: Array<{
+  problemId: string;
+  language: CodeLanguage;
+  functionName: string;
+  inputSchema: Prisma.InputJsonObject;
+  outputSchema: Prisma.InputJsonObject;
+  harnessTemplate: string;
+}> = [
+  {
+    problemId: "two-sum",
+    language: CodeLanguage.Python,
+    functionName: "solve",
+    inputSchema: {
+      type: "array",
+      minItems: 2,
+      maxItems: 2,
+      prefixItems: [
+        { type: "array", items: { type: "number" } },
+        { type: "number" },
+      ],
+    },
+    outputSchema: {
+      type: "array",
+      items: { type: "integer" },
+    },
+    harnessTemplate: PYTHON_JSON_HARNESS_TEMPLATE,
+  },
+  {
+    problemId: "valid-anagram",
+    language: CodeLanguage.Python,
+    functionName: "solve",
+    inputSchema: {
+      type: "array",
+      minItems: 2,
+      maxItems: 2,
+      prefixItems: [{ type: "string" }, { type: "string" }],
+    },
+    outputSchema: { type: "boolean" },
+    harnessTemplate: PYTHON_JSON_HARNESS_TEMPLATE,
+  },
+  {
+    problemId: "contains-duplicate",
+    language: CodeLanguage.Python,
+    functionName: "solve",
+    inputSchema: {
+      type: "array",
+      minItems: 1,
+      maxItems: 1,
+      prefixItems: [{ type: "array", items: { type: "number" } }],
+    },
+    outputSchema: { type: "boolean" },
+    harnessTemplate: PYTHON_JSON_HARNESS_TEMPLATE,
+  },
+  {
+    problemId: "binary-search",
+    language: CodeLanguage.Python,
+    functionName: "solve",
+    inputSchema: {
+      type: "array",
+      minItems: 2,
+      maxItems: 2,
+      prefixItems: [
+        { type: "array", items: { type: "number" } },
+        { type: "number" },
+      ],
+    },
+    outputSchema: { type: "integer" },
+    harnessTemplate: PYTHON_JSON_HARNESS_TEMPLATE,
+  },
+];
 
 function toDifficulty(difficulty: SeedProblem["difficulty"]): Difficulty {
   switch (difficulty) {
@@ -83,6 +161,24 @@ function validateSeedData(): void {
         );
       }
     }
+  }
+
+  const runnerConfigKeys = new Set<string>();
+
+  for (const config of beginnerRunnerConfigs) {
+    if (!problemIds.has(config.problemId)) {
+      throw new Error(
+        `Runner config references unknown problem ${config.problemId}.`,
+      );
+    }
+
+    const key = `${config.problemId}:${config.language}`;
+
+    if (runnerConfigKeys.has(key)) {
+      throw new Error(`Duplicate runner config in seed data: ${key}`);
+    }
+
+    runnerConfigKeys.add(key);
   }
 }
 
@@ -188,18 +284,49 @@ async function main(): Promise<void> {
         },
       });
     }
+
+    for (const config of beginnerRunnerConfigs) {
+      const result = await tx.problemRunnerConfig.updateMany({
+        where: {
+          problemId: config.problemId,
+          language: config.language,
+        },
+        data: {
+          functionName: config.functionName,
+          inputSchema: config.inputSchema,
+          outputSchema: config.outputSchema,
+          harnessTemplate: config.harnessTemplate,
+          isEnabled: true,
+        },
+      });
+
+      if (result.count === 0) {
+        await tx.problemRunnerConfig.create({
+          data: {
+            ...config,
+            isEnabled: true,
+          },
+        });
+      }
+    }
   });
 
-  const [patternCount, problemCount, problemPatternCount, achievementCount] =
-    await Promise.all([
-      prisma.pattern.count(),
-      prisma.problem.count(),
-      prisma.problemPattern.count(),
-      prisma.achievement.count(),
-    ]);
+  const [
+    patternCount,
+    problemCount,
+    problemPatternCount,
+    achievementCount,
+    runnerConfigCount,
+  ] = await Promise.all([
+    prisma.pattern.count(),
+    prisma.problem.count(),
+    prisma.problemPattern.count(),
+    prisma.achievement.count(),
+    prisma.problemRunnerConfig.count(),
+  ]);
 
   console.log(
-    `Seeded ${patternCount} patterns, ${problemCount} problems, ${problemPatternCount} problem-pattern relationships, and ${achievementCount} achievements.`,
+    `Seeded ${patternCount} patterns, ${problemCount} problems, ${problemPatternCount} problem-pattern relationships, ${achievementCount} achievements, and ${runnerConfigCount} runner configs.`,
   );
 }
 

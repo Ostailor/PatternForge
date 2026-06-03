@@ -35,6 +35,30 @@ export type ScoreInterviewRoundInput = {
   codeText: string | null;
   testCasesText: string | null;
   complexityText: string | null;
+  codeExecution: ScoreInterviewCodeExecution | null;
+};
+
+export type ScoreInterviewCodeExecution = {
+  didRun: boolean;
+  latestRunStatus: string | null;
+  runtimeMs: number | null;
+  totalTests: number;
+  testsPassed: number;
+  testsFailed: number;
+  successfulRunCount: number;
+  failedRunCount: number;
+  userCreatedTestCount: number;
+  fixedAfterFailedRun: boolean;
+  stdout: string;
+  stderr: string;
+  runtimeError: string | null;
+  failedTestSummaries: {
+    name: string;
+    inputJson: unknown;
+    expectedOutputJson: unknown;
+    actualOutputJson: unknown;
+    errorMessage: string | null;
+  }[];
 };
 
 export type ScoreInterviewInput = {
@@ -252,6 +276,85 @@ function scoreText(value: string | null, medium: number, strong: number): number
   return 20;
 }
 
+function mentionsFailedCaseExplanation(value: string | null): boolean {
+  const text = value?.toLowerCase() ?? "";
+
+  return (
+    text.includes("fail") ||
+    text.includes("error") ||
+    text.includes("expected") ||
+    text.includes("actual") ||
+    text.includes("fix")
+  );
+}
+
+function scoreImplementationEvidence(round: ScoreInterviewRoundInput): number {
+  const writtenScore = hasText(round.codeText)
+    ? scoreText(round.codeText, 180, 600)
+    : scoreText(round.approachText, 180, 520);
+  const execution = round.codeExecution;
+
+  if (!execution?.didRun) {
+    return writtenScore;
+  }
+
+  let executionScore = writtenScore;
+
+  if (
+    execution.latestRunStatus === "Succeeded" &&
+    execution.testsPassed > 0 &&
+    execution.testsFailed === 0
+  ) {
+    executionScore = Math.max(executionScore, 82);
+  } else if (
+    execution.latestRunStatus === "RuntimeError" ||
+    execution.latestRunStatus === "TimedOut"
+  ) {
+    executionScore = Math.min(executionScore, 58);
+  } else if (execution.testsFailed > 0 || execution.failedRunCount > 0) {
+    executionScore = Math.min(executionScore, 68);
+  }
+
+  if (execution.fixedAfterFailedRun) {
+    executionScore += 8;
+  }
+
+  return clampInterviewScore(executionScore);
+}
+
+function scoreTestingEvidence(round: ScoreInterviewRoundInput): number {
+  const writtenScore = scoreText(round.testCasesText, 80, 260);
+  const execution = round.codeExecution;
+
+  if (!execution?.didRun) {
+    return writtenScore;
+  }
+
+  let testingScore = writtenScore;
+
+  if (execution.totalTests >= 2 || execution.userCreatedTestCount >= 2) {
+    testingScore = Math.max(testingScore, 78);
+  } else if (execution.totalTests === 1) {
+    testingScore = Math.max(testingScore, 62);
+  }
+
+  if (execution.testsFailed > 0) {
+    testingScore = mentionsFailedCaseExplanation(round.testCasesText)
+      ? Math.max(testingScore, 74)
+      : Math.min(testingScore, 62);
+  }
+
+  if (
+    execution.latestRunStatus === "Succeeded" &&
+    execution.testsPassed > 0 &&
+    execution.testsFailed === 0
+  ) {
+    testingScore = Math.max(testingScore, 82);
+  }
+
+  return clampInterviewScore(testingScore);
+}
+
 function average(scores: number[]): number {
   if (scores.length === 0) {
     return 1;
@@ -306,14 +409,10 @@ function buildFallbackScore(input: ScoreInterviewInput): ScoreInterviewOutput {
       input.rounds.map((round) => scoreText(round.approachText, 120, 380)),
     ),
     Implementation: average(
-      input.rounds.map((round) =>
-        hasText(round.codeText)
-          ? scoreText(round.codeText, 180, 600)
-          : scoreText(round.approachText, 180, 520),
-      ),
+      input.rounds.map((round) => scoreImplementationEvidence(round)),
     ),
     Testing: average(
-      input.rounds.map((round) => scoreText(round.testCasesText, 80, 260)),
+      input.rounds.map((round) => scoreTestingEvidence(round)),
     ),
     Complexity: average(
       input.rounds.map((round) =>
@@ -342,6 +441,20 @@ function buildFallbackScore(input: ScoreInterviewInput): ScoreInterviewOutput {
     hasText(round.codeText)
       ? ""
       : "Implementation code was missing; implementation confidence is limited to the written plan.",
+    round.codeExecution?.didRun
+      ? ""
+      : `Round ${round.roundNumber} did not include a PatternForge code run; implementation confidence is limited.`,
+    round.codeExecution?.latestRunStatus === "RuntimeError" ||
+    round.codeExecution?.latestRunStatus === "TimedOut"
+      ? `Round ${round.roundNumber} had ${round.codeExecution.latestRunStatus} in custom execution.`
+      : "",
+    round.codeExecution?.testsFailed
+      ? `Round ${round.roundNumber} had ${round.codeExecution.testsFailed} failed custom test${round.codeExecution.testsFailed === 1 ? "" : "s"}.`
+      : "",
+    round.codeExecution?.testsFailed &&
+    !mentionsFailedCaseExplanation(round.testCasesText)
+      ? `Round ${round.roundNumber} did not clearly explain failed custom cases in the Testing phase.`
+      : "",
   ]).filter(Boolean);
 
   return {
@@ -349,7 +462,9 @@ function buildFallbackScore(input: ScoreInterviewInput): ScoreInterviewOutput {
     overallScore,
     result: getResultFromScore(overallScore),
     summary:
-      "Interview scored from saved PatternForge metadata and user-provided responses. Code was not executed, so implementation confidence is limited unless the user supplied actual execution evidence.",
+      input.rounds.some((round) => round.codeExecution?.didRun)
+        ? "Interview scored from saved PatternForge metadata, user-provided responses, and PatternForge custom self-test evidence. These runs are not official correctness results."
+        : "Interview scored from saved PatternForge metadata and user-provided responses. Code was not run in PatternForge, so implementation confidence is limited.",
     strengths: [
       textLength(...input.rounds.map((round) => round.approachText)) > 200
         ? "Approach reasoning was captured with useful detail."
@@ -405,8 +520,10 @@ function buildScoreInterviewMessages(input: ScoreInterviewInput) {
         "Score like a realistic but fair technical interviewer.",
         "Use only PatternForge metadata and user-provided text or code.",
         "Never copy, reconstruct, or invent LeetCode problem statements.",
-        "Do not claim submitted code passes all tests unless actual execution evidence is present in the user input.",
+        "Do not claim submitted code passes all tests, official tests, or LeetCode tests.",
+        "Only describe execution as PatternForge custom tests or self-tests.",
         "If code is missing, score implementation from the plan and say confidence is limited.",
+        "If codeExecution is null or didRun is false, say implementation confidence is limited because code was not run in PatternForge.",
         "If the selected pattern is wrong, explain the difference between selected and correct pattern without being harsh.",
         "Keep tone honest, specific, and constructive.",
         "Return valid JSON only. Do not wrap JSON in markdown.",
@@ -420,8 +537,8 @@ function buildScoreInterviewMessages(input: ScoreInterviewInput) {
         "Communication: clarity, structure, and responses to interviewer prompts.",
         "PatternRecognition: correct pattern choice and explanation of why it applies.",
         "ProblemSolving: reasonable approach, key invariant, and data structure reasoning.",
-        "Implementation: likely correctness from code or plan, obvious bugs, and missing cases. Do not claim code passes tests.",
-        "Testing: meaningful tests and edge cases.",
+        "Implementation: likely correctness from code, plan, and PatternForge custom execution evidence. Consider whether code ran, whether custom tests passed, whether runtime errors occurred, and whether the user fixed issues after a failed run.",
+        "Testing: meaningful tests and edge cases. Consider whether the user wrote custom tests, whether they ran them, whether failed cases were explained, and whether the test set is substantial.",
         "Complexity: correctness of time and space analysis.",
         "TimeManagement: reasonable movement through phases based on timestamps and duration.",
         "Return JSON matching this TypeScript shape:",

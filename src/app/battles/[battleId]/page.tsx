@@ -4,8 +4,15 @@ import { notFound, redirect } from "next/navigation";
 
 import { abandonBattleAction } from "@/app/battles/[battleId]/actions";
 import BattleRoundClient from "@/app/battles/[battleId]/battle-round-client";
+import type {
+  DebugInsightView,
+  WorkspaceSubmissionHistoryItem,
+  WorkspaceTestCaseItem,
+} from "@/components/code-workspace/types";
 import ProgressBar from "@/components/ProgressBar";
 import { patterns } from "@/data/patterns";
+import { TestCaseSource } from "@/generated/prisma/client";
+import { getRunnerConfig } from "@/lib/code-runner/runnerConfig";
 import { getPrisma } from "@/lib/prisma";
 import type { Problem } from "@/lib/types";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
@@ -16,6 +23,13 @@ type BattleRunnerPageProps = {
 
 type BattleForRunner = NonNullable<Awaited<ReturnType<typeof getBattleForRunner>>>;
 type BattleRoundForRunner = BattleForRunner["rounds"][number];
+
+type BattleWorkspaceData = {
+  runnerConfigured: boolean;
+  initialHistory: WorkspaceSubmissionHistoryItem[];
+  initialTestCases: WorkspaceTestCaseItem[];
+  initialDebugInsight: DebugInsightView | null;
+};
 
 function formatBattleType(battleType: string): string {
   switch (battleType) {
@@ -94,6 +108,182 @@ async function getBattleForRunner(battleId: string, userProfileId: string) {
   });
 }
 
+async function getRunnerConfigSafely(problemId: string) {
+  try {
+    return await getRunnerConfig(problemId, "Python");
+  } catch {
+    return null;
+  }
+}
+
+async function getBattleSubmissionHistory({
+  userProfileId,
+  problemId,
+  battleRoundId,
+}: {
+  userProfileId: string;
+  problemId: string;
+  battleRoundId: string;
+}): Promise<WorkspaceSubmissionHistoryItem[]> {
+  try {
+    const submissions = await getPrisma().codeSubmission.findMany({
+      where: {
+        userProfileId,
+        problemId,
+        battleRoundId,
+      },
+      include: {
+        codeRuns: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 1,
+        },
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+      take: 8,
+    });
+
+    return submissions.map((submission) => ({
+      id: submission.id,
+      language: "Python",
+      status: submission.status,
+      createdAt: submission.createdAt.toISOString(),
+      updatedAt: submission.updatedAt.toISOString(),
+      runCount: submission.codeRuns.length,
+      latestRunStatus: submission.codeRuns[0]?.status ?? null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function getBattleTestCases({
+  userProfileId,
+  problemId,
+}: {
+  userProfileId: string;
+  problemId: string;
+}): Promise<WorkspaceTestCaseItem[]> {
+  try {
+    const testCases = await getPrisma().testCase.findMany({
+      where: {
+        problemId,
+        OR: [
+          {
+            source: TestCaseSource.PatternForge,
+            isPublic: true,
+          },
+          {
+            source: TestCaseSource.User,
+            userProfileId,
+          },
+        ],
+      },
+      orderBy: [
+        {
+          source: "asc",
+        },
+        {
+          createdAt: "desc",
+        },
+      ],
+      take: 10,
+    });
+
+    return testCases.map((testCase) => ({
+      id: testCase.id,
+      source: testCase.source,
+      name: testCase.name,
+      inputJson: testCase.inputJson,
+      expectedOutputJson: testCase.expectedOutputJson,
+      isPublic: testCase.isPublic,
+      createdAt: testCase.createdAt.toISOString(),
+      updatedAt: testCase.updatedAt.toISOString(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function getLatestBattleDebugInsight({
+  userProfileId,
+  problemId,
+  battleRoundId,
+}: {
+  userProfileId: string;
+  problemId: string;
+  battleRoundId: string;
+}): Promise<DebugInsightView | null> {
+  try {
+    const insight = await getPrisma().debugInsight.findFirst({
+      where: {
+        userProfileId,
+        codeRun: {
+          codeSubmission: {
+            problemId,
+            battleRoundId,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return insight
+      ? {
+          id: insight.id,
+          summary: insight.summary,
+          likelyCause: insight.likelyCause,
+          suggestedFix: insight.suggestedFix,
+          followUpQuestion: insight.followUpQuestion,
+          createdAt: insight.createdAt.toISOString(),
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getBattleWorkspaceData({
+  userProfileId,
+  problemId,
+  battleRoundId,
+}: {
+  userProfileId: string;
+  problemId: string;
+  battleRoundId: string;
+}): Promise<BattleWorkspaceData> {
+  const [runnerConfig, initialHistory, initialTestCases, initialDebugInsight] =
+    await Promise.all([
+      getRunnerConfigSafely(problemId),
+      getBattleSubmissionHistory({
+        userProfileId,
+        problemId,
+        battleRoundId,
+      }),
+      getBattleTestCases({
+        userProfileId,
+        problemId,
+      }),
+      getLatestBattleDebugInsight({
+        userProfileId,
+        problemId,
+        battleRoundId,
+      }),
+    ]);
+
+  return {
+    runnerConfigured: Boolean(runnerConfig),
+    initialHistory,
+    initialTestCases,
+    initialDebugInsight,
+  };
+}
+
 export default async function BattleRunnerPage({
   params,
 }: BattleRunnerPageProps) {
@@ -134,6 +324,11 @@ export default async function BattleRunnerPage({
   const currentRoundNumber = currentRound.roundNumber;
   const isFinalRound = completedRoundCount + 1 >= battle.totalRounds;
   const problem = toPracticeProblem(currentRound);
+  const workspaceData = await getBattleWorkspaceData({
+    userProfileId: userProfile.id,
+    problemId: currentRound.problemId,
+    battleRoundId: currentRound.id,
+  });
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -185,6 +380,7 @@ export default async function BattleRunnerPage({
           problem={problem}
           patterns={patterns}
           isFinalRound={isFinalRound}
+          workspaceData={workspaceData}
         />
       </section>
     </main>

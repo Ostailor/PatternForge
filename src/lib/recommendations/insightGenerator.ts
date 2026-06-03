@@ -296,6 +296,158 @@ export function buildReadyForBossRecommendation({
   };
 }
 
+export function buildDebugDrillRecommendation({
+  patternId,
+  patternName,
+  problemId,
+  runtimeErrorCount,
+}: {
+  patternId?: string;
+  patternName?: string;
+  problemId?: string;
+  runtimeErrorCount: number;
+}): RecommendationCandidate {
+  return {
+    title: patternName ? `Debug ${patternName} runtime errors` : "Run a Debug Drill",
+    reason: patternName
+      ? `${patternName} has repeated runtime errors in server-side code runs. Use a focused debug pass before adding harder reps.`
+      : "Recent code runs show repeated runtime errors. Use a focused debug pass before adding harder reps.",
+    priority: 5,
+    recommendationType: "DebugDrill",
+    targetPatternId: patternId,
+    problemId,
+    metadata: {
+      reasonCode: "repeated_runtime_errors",
+      runtimeErrorCount,
+    },
+    evidence: [`${runtimeErrorCount} runtime error run${runtimeErrorCount === 1 ? "" : "s"}`],
+  };
+}
+
+export function buildTestingPracticeRecommendation({
+  problemId,
+  averageTestsPerRun,
+  totalCodeRuns,
+}: {
+  problemId?: string;
+  averageTestsPerRun: number;
+  totalCodeRuns: number;
+}): RecommendationCandidate {
+  return {
+    title: "Practice writing custom tests",
+    reason:
+      "Your code runs have a low custom-test count. Add focused inputs and expected outputs before relying on a solution explanation.",
+    priority: 6,
+    recommendationType: "TestingPractice",
+    problemId,
+    metadata: {
+      reasonCode: "low_custom_test_discipline",
+      averageTestsPerRun,
+      totalCodeRuns,
+    },
+    evidence: [
+      `${averageTestsPerRun} average tests per run`,
+      `${totalCodeRuns} saved code run${totalCodeRuns === 1 ? "" : "s"}`,
+    ],
+  };
+}
+
+export function buildImplementationPracticeRecommendation({
+  patternId,
+  patternName,
+  problemId,
+  failedRunCount,
+  recognitionAccuracy,
+}: {
+  patternId?: string;
+  patternName?: string;
+  problemId?: string;
+  failedRunCount: number;
+  recognitionAccuracy: number;
+}): RecommendationCandidate {
+  return {
+    title: patternName
+      ? `Implementation practice: ${patternName}`
+      : "Implementation-focused practice",
+    reason: patternName
+      ? `${patternName} recognition is strong, but recent custom test runs are failing. Focus on turning the pattern into correct code.`
+      : "Pattern recognition is strong, but recent custom test runs are failing. Focus on turning the pattern into correct code.",
+    priority: 5,
+    recommendationType: "ImplementationPractice",
+    targetPatternId: patternId,
+    problemId,
+    metadata: {
+      reasonCode: "strong_recognition_failed_runs",
+      failedRunCount,
+      recognitionAccuracy,
+    },
+    evidence: [
+      `${failedRunCount} failed custom-test run${failedRunCount === 1 ? "" : "s"}`,
+      `Recognition ${recognitionAccuracy}%`,
+    ],
+  };
+}
+
+export function buildExplanationPracticeRecommendation({
+  patternId,
+  patternName,
+  problemId,
+  explanationScore,
+}: {
+  patternId?: string;
+  patternName?: string;
+  problemId?: string;
+  explanationScore: number;
+}): RecommendationCandidate {
+  return {
+    title: "Practice explaining a self-tested solution",
+    reason: patternName
+      ? `${patternName} has a successful self-test signal, but AI review flagged the explanation. Practice articulating invariants, edge cases, and tradeoffs.`
+      : "A solution has successful self-tests, but AI review flagged the explanation. Practice articulating invariants, edge cases, and tradeoffs.",
+    priority: 5,
+    recommendationType: "AIReviewFollowUp",
+    targetPatternId: patternId,
+    problemId,
+    metadata: {
+      reasonCode: "self_tests_passed_low_ai_explanation",
+      explanationScore,
+    },
+    evidence: [
+      "Successful self-test run exists",
+      `AI explanation score ${explanationScore}%`,
+    ],
+  };
+}
+
+export function buildSuccessfulSelfTestsRecommendation({
+  patternId,
+  patternName,
+  successfulProblemCount,
+}: {
+  patternId?: string;
+  patternName?: string;
+  successfulProblemCount: number;
+}): RecommendationCandidate {
+  return {
+    title: "Pressure-test successful self-tests",
+    reason: patternName
+      ? `${patternName} has strong mastery with successful self-tests. Move to Interview Mode or a Boss Battle for pressure and explanation practice.`
+      : "You have strong mastery with successful self-tests. Move to Interview Mode or a Boss Battle for pressure and explanation practice.",
+    priority: 7,
+    recommendationType: "MockInterview",
+    targetPatternId: patternId,
+    metadata: {
+      interviewType: "MixedInterview",
+      reasonCode: "successful_self_tests_high_mastery",
+      successfulProblemCount,
+    },
+    evidence: [
+      `${successfulProblemCount} problem${successfulProblemCount === 1 ? "" : "s"} with successful self-tests`,
+      patternName ? `${patternName} mastery is strong` : "Mastery is strong",
+    ],
+  };
+}
+
 export function buildDailyForgeRecommendation({
   targetPatternId,
   patternName,

@@ -22,6 +22,8 @@ const reviewInput: AIReviewInput = {
   reflection: "I tried sorting first.",
   userCode: "",
   userExplanation: "I moved pointers after sorting.",
+  codeExecution: null,
+  latestDebugInsight: null,
 };
 
 test("review prompt frames AI Coach as a pattern tutor", () => {

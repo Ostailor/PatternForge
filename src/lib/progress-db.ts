@@ -50,6 +50,7 @@ export type CreateAttemptInput = {
   timeSpentMinutes: number;
   confidence: Confidence;
   reflection: string;
+  codeSubmissionId?: string;
   createdAt?: string;
 };
 
@@ -1050,6 +1051,38 @@ export async function createAttemptForUserProfileWithClient(
     },
   });
   const appAttempt = toAppAttempt(attempt);
+
+  if (input.codeSubmissionId?.trim()) {
+    const codeSubmissionId = input.codeSubmissionId.trim();
+    const linkedSubmission = await client.codeSubmission.updateMany({
+      where: {
+        id: codeSubmissionId,
+        userProfileId,
+        problemId: input.problemId,
+        attemptId: null,
+        interviewRoundId: null,
+        battleRoundId: null,
+      },
+      data: {
+        attemptId: attempt.id,
+      },
+    });
+
+    if (linkedSubmission.count > 0) {
+      await client.debugInsight.updateMany({
+        where: {
+          userProfileId,
+          attemptId: null,
+          codeRun: {
+            codeSubmissionId,
+          },
+        },
+        data: {
+          attemptId: attempt.id,
+        },
+      });
+    }
+  }
 
   await createGameEventWithClient(
     client,

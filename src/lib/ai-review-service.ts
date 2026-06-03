@@ -38,6 +38,64 @@ function unique(values: string[]): string[] {
   );
 }
 
+function buildCodeExecutionInput(
+  attempt: NonNullable<
+    Awaited<ReturnType<typeof getAttemptForAIReview>>
+  >,
+): AIReviewInput["codeExecution"] {
+  const latestSubmission = attempt.codeSubmissions[0];
+  const latestRun = latestSubmission?.codeRuns[0];
+
+  if (!latestRun) {
+    return null;
+  }
+
+  const failedTestResults = latestRun.testResults.filter(
+    (testResult) => !testResult.passed,
+  );
+
+  return {
+    runStatus: latestRun.status,
+    runtimeMs: latestRun.runtimeMs,
+    testsPassed: latestRun.testResults.length - failedTestResults.length,
+    testsFailed: failedTestResults.length,
+    failedTestSummaries: failedTestResults.slice(0, 5).map((testResult) => ({
+      name: testResult.name,
+      inputJson: testResult.inputJson,
+      expectedOutputJson: testResult.expectedOutputJson,
+      actualOutputJson: testResult.actualOutputJson,
+      errorMessage: testResult.errorMessage,
+    })),
+    stdout: latestRun.stdout,
+    stderr: latestRun.stderr,
+    runtimeError: latestRun.errorMessage,
+  };
+}
+
+function getLatestWorkspaceCode(
+  attempt: NonNullable<
+    Awaited<ReturnType<typeof getAttemptForAIReview>>
+  >,
+): string {
+  return attempt.codeSubmissions[0]?.code ?? "";
+}
+
+function getLatestDebugInsight(
+  attempt: NonNullable<
+    Awaited<ReturnType<typeof getAttemptForAIReview>>
+  >,
+): AIReviewInput["latestDebugInsight"] {
+  const insight = attempt.debugInsights[0];
+
+  return insight
+    ? {
+        summary: insight.summary,
+        likelyCause: insight.likelyCause,
+        suggestedFix: insight.suggestedFix,
+      }
+    : null;
+}
+
 function buildAIReviewInput(
   attempt: NonNullable<
     Awaited<ReturnType<typeof getAttemptForAIReview>>
@@ -47,6 +105,8 @@ function buildAIReviewInput(
   const secondaryPatternNames = attempt.problem.problemPatterns
     .filter((problemPattern) => !problemPattern.isPrimary)
     .map((problemPattern) => problemPattern.pattern.name);
+  const pastedCode = input.userCode.trim();
+  const workspaceCode = getLatestWorkspaceCode(attempt);
 
   // Product boundary: PatternForge does not scrape LeetCode and does not store
   // full LeetCode statements. AI review uses only user-provided content plus
@@ -75,8 +135,10 @@ function buildAIReviewInput(
     timeSpentMinutes: attempt.timeSpentMinutes,
     confidence: attempt.confidence,
     reflection: attempt.reflection,
-    userCode: input.userCode.trim(),
+    userCode: pastedCode || workspaceCode,
     userExplanation: input.userExplanation.trim(),
+    codeExecution: buildCodeExecutionInput(attempt),
+    latestDebugInsight: getLatestDebugInsight(attempt),
   };
 }
 
@@ -98,6 +160,33 @@ async function getAttemptForAIReview(attemptId: string, userProfileId: string) {
       },
       selectedPattern: true,
       correctPattern: true,
+      debugInsights: {
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 1,
+      },
+      codeSubmissions: {
+        orderBy: {
+          updatedAt: "desc",
+        },
+        take: 1,
+        include: {
+          codeRuns: {
+            orderBy: {
+              createdAt: "desc",
+            },
+            take: 1,
+            include: {
+              testResults: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
+            },
+          },
+        },
+      },
     },
   });
 }

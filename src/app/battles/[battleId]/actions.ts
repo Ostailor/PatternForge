@@ -26,6 +26,7 @@ export type SaveBattleRoundAttemptInput = {
   timeSpentMinutes: number;
   confidence: Confidence;
   reflection: string;
+  codeSubmissionId?: string;
 };
 
 export type SaveBattleRoundAttemptResult =
@@ -62,6 +63,47 @@ function validateBattleRoundAttemptInput(
   }
 
   return null;
+}
+
+function getBattleRoundExecutionScore(round: {
+  codeSubmissions: {
+    codeRuns: {
+      createdAt: Date;
+      runType: string;
+      status: string;
+      testResults: {
+        testCaseId: string | null;
+        passed: boolean;
+        testCase: {
+          source: string;
+        } | null;
+      }[];
+    }[];
+  }[];
+}) {
+  const runs = round.codeSubmissions.flatMap((submission) => submission.codeRuns);
+  const customTestRuns = runs
+    .filter((run) => run.runType === "CustomTests")
+    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+  const latestCustomRun = customTestRuns.at(-1);
+  const latestUserTestResults =
+    latestCustomRun?.testResults.filter(
+      (testResult) => testResult.testCase?.source === "User",
+    ) ?? [];
+
+  return {
+    hasSuccessfulCustomTestRun: customTestRuns.some(
+      (run) => run.status === "Succeeded",
+    ),
+    allUserCustomTestsPassed:
+      latestUserTestResults.length > 0 &&
+      latestUserTestResults.every((testResult) => testResult.passed),
+    userCreatedTestCount: new Set(
+      latestUserTestResults
+        .map((testResult) => testResult.testCaseId)
+        .filter((testCaseId): testCaseId is string => Boolean(testCaseId)),
+    ).size,
+  };
 }
 
 export async function saveBattleRoundAttemptAction(
@@ -142,9 +184,41 @@ export async function saveBattleRoundAttemptAction(
           timeSpentMinutes: input.timeSpentMinutes,
           confidence: input.confidence,
           reflection: input.reflection,
+          codeSubmissionId: input.codeSubmissionId,
         });
 
       if (!round.attemptId || !round.completedAt) {
+        if (input.codeSubmissionId?.trim()) {
+          const codeSubmissionId = input.codeSubmissionId.trim();
+          const linkedSubmission = await tx.codeSubmission.updateMany({
+            where: {
+              id: codeSubmissionId,
+              userProfileId: userProfile.id,
+              problemId: input.problemId,
+              battleRoundId: round.id,
+              attemptId: null,
+            },
+            data: {
+              attemptId: attempt.id,
+            },
+          });
+
+          if (linkedSubmission.count > 0) {
+            await tx.debugInsight.updateMany({
+              where: {
+                userProfileId: userProfile.id,
+                attemptId: null,
+                codeRun: {
+                  codeSubmissionId,
+                },
+              },
+              data: {
+                attemptId: attempt.id,
+              },
+            });
+          }
+        }
+
         await tx.battleRound.update({
           where: {
             id: round.id,
@@ -175,6 +249,26 @@ export async function saveBattleRoundAttemptAction(
                 solvedStatus: true,
               },
             },
+            codeSubmissions: {
+              include: {
+                codeRuns: {
+                  orderBy: {
+                    createdAt: "asc",
+                  },
+                  include: {
+                    testResults: {
+                      include: {
+                        testCase: {
+                          select: {
+                            source: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         });
 
@@ -184,6 +278,7 @@ export async function saveBattleRoundAttemptAction(
               wasPatternCorrect:
                 completedRound.attempt?.wasPatternCorrect ?? false,
               solvedStatus: completedRound.attempt?.solvedStatus ?? "NotSolved",
+              ...getBattleRoundExecutionScore(completedRound),
             })),
           );
 
@@ -221,6 +316,7 @@ export async function saveBattleRoundAttemptAction(
               solvedRoundCount: score.solvedRoundCount,
               partiallySolvedRoundCount: score.partiallySolvedRoundCount,
               completedOrPartialCount: score.completedOrPartialCount,
+              executionBonusXp: score.executionBonusXp,
             },
           );
           await updateQuestProgress(tx, userProfile.id, {

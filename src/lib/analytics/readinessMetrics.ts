@@ -6,6 +6,7 @@ import type {
 } from "@/generated/prisma/enums";
 import { getPrisma } from "@/lib/prisma";
 
+import { getCodeExecutionMetrics } from "./codeExecutionMetrics";
 import { getPatternConfusions } from "./confusionMetrics";
 import { getPatternMetrics, getWeakestPatternMetric } from "./patternMetrics";
 import {
@@ -626,10 +627,11 @@ export async function getReadinessReport(
   userProfileId: string,
 ): Promise<ReadinessReport> {
   const scopedUserProfileId = userProfileId.trim();
-  const [patternMetrics, confusions, interviewPerformance] = await Promise.all([
+  const [patternMetrics, confusions, interviewPerformance, codeExecution] = await Promise.all([
     getPatternMetrics(scopedUserProfileId),
     getPatternConfusions(scopedUserProfileId),
     getInterviewReadinessPerformance(scopedUserProfileId),
+    getCodeExecutionMetrics(scopedUserProfileId),
   ]);
   const scoreBreakdown = calculateReadinessScoreBreakdown(
     patternMetrics,
@@ -659,6 +661,7 @@ export async function getReadinessReport(
     patternsReadyForBoss,
     patternsNeedingReview,
     interviewPerformance,
+    codeExecution,
     recommendedNextSevenDays: buildRecommendedNextSevenDays({
       weakestPatterns,
       confusingPatternPairs,

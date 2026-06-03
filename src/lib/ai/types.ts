@@ -20,6 +20,27 @@ export type AIReviewInput = {
   reflection: string;
   userCode: string;
   userExplanation: string;
+  codeExecution: {
+    runStatus: string;
+    runtimeMs: number | null;
+    testsPassed: number;
+    testsFailed: number;
+    failedTestSummaries: {
+      name: string;
+      inputJson: unknown;
+      expectedOutputJson: unknown;
+      actualOutputJson: unknown;
+      errorMessage: string | null;
+    }[];
+    stdout: string;
+    stderr: string;
+    runtimeError: string | null;
+  } | null;
+  latestDebugInsight: {
+    summary: string;
+    likelyCause: string;
+    suggestedFix: string;
+  } | null;
 };
 
 export type SuggestedMistake = {

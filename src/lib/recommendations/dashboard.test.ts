@@ -165,3 +165,52 @@ test("formats interview recommendations with interview CTAs", () => {
   assert.equal(focusedInterview.primaryCta.label, "Start Focused Interview");
   assert.equal(repairInterview.primaryCta.label, "Start Weakness Repair Interview");
 });
+
+test("formats code execution recommendations with workspace CTAs", () => {
+  const debugDrill = toDashboardRecommendation(
+    recommendation({
+      title: "Debug Sliding Window runtime errors",
+      recommendationType: "DebugDrill",
+      priority: 5,
+      targetPatternId: "sliding-window",
+      problemId: "minimum-size-subarray-sum",
+      reason: "Sliding Window has repeated runtime errors.",
+      evidence: ["2 runtime error runs"],
+    }),
+  );
+  const testingPractice = toDashboardRecommendation(
+    recommendation({
+      title: "Practice writing custom tests",
+      recommendationType: "TestingPractice",
+      priority: 6,
+      problemId: "two-sum",
+      reason: "Custom-test count is low.",
+      evidence: ["0.5 average tests per run"],
+    }),
+  );
+  const implementationPractice = toDashboardRecommendation(
+    recommendation({
+      title: "Implementation practice: Binary Search",
+      recommendationType: "ImplementationPractice",
+      priority: 5,
+      targetPatternId: "binary-search",
+      reason: "Recognition is strong, but custom test runs are failing.",
+      evidence: ["2 failed custom-test runs"],
+    }),
+  );
+
+  assert.equal(debugDrill.recommendationTypeLabel, "Debug Drill");
+  assert.equal(debugDrill.primaryCta.label, "Open Workspace");
+  assert.equal(
+    debugDrill.primaryCta.href,
+    "/problems/minimum-size-subarray-sum/workspace?mode=Practice",
+  );
+  assert.equal(debugDrill.secondaryCta?.label, "Code History");
+  assert.equal(testingPractice.recommendationTypeLabel, "Testing Practice");
+  assert.equal(testingPractice.primaryCta.label, "Write Custom Tests");
+  assert.equal(implementationPractice.recommendationTypeLabel, "Implementation Practice");
+  assert.equal(
+    implementationPractice.primaryCta.href,
+    "/forge?pattern=binary-search",
+  );
+});

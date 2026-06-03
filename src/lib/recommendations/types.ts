@@ -19,7 +19,10 @@ export type RecommendationType =
   | "MockInterview"
   | "FocusedInterview"
   | "WeaknessRepairInterview"
-  | "DailyForge";
+  | "DailyForge"
+  | "DebugDrill"
+  | "TestingPractice"
+  | "ImplementationPractice";
 
 export type RecommendationBattleType =
   | "PatternBoss"

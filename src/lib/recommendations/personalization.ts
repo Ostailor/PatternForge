@@ -27,6 +27,9 @@ const tunableRecommendationTypes = new Set<RecommendationType>([
   "MockInterview",
   "FocusedInterview",
   "WeaknessRepairInterview",
+  "DebugDrill",
+  "TestingPractice",
+  "ImplementationPractice",
 ]);
 
 function makeExactKey(
