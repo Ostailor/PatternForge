@@ -72,7 +72,7 @@ function toAnalyticsAttempt(attempt: DbAttemptForMetrics): Attempt {
     solvedStatus: toSolvedStatus(attempt.solvedStatus),
     timeSpentMinutes: attempt.timeSpentMinutes,
     confidence: Math.min(Math.max(attempt.confidence, 1), 5) as Confidence,
-    reflection: attempt.reflection,
+    reflection: "",
     createdAt: attempt.createdAt.toISOString(),
   };
 }
@@ -158,7 +158,6 @@ async function loadPatternMetricData(userProfileId: string) {
           solvedStatus: true,
           timeSpentMinutes: true,
           confidence: true,
-          reflection: true,
           createdAt: true,
         },
         orderBy: { createdAt: "asc" },

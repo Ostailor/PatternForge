@@ -2,13 +2,15 @@
 
 import { SignInButton } from "@clerk/nextjs";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { generateDailySession } from "@/lib/session";
 import { getAttempts } from "@/lib/progress";
 import type { DailyForgeSession, DailyForgeStep } from "@/lib/session";
 import type { Problem } from "@/lib/types";
 import { useAuthProgress } from "@/lib/use-auth-progress";
+
+import { trackDailyForgeStartedAction } from "./actions";
 
 const difficultyStyles: Record<Problem["difficulty"], string> = {
   Easy: "border-teal-200 bg-teal-50 text-teal-700",
@@ -36,21 +38,33 @@ export default function ForgePage() {
   const [session, setSession] = useState<DailyForgeSession>(() =>
     generateDailySession([]),
   );
+  const trackedSessionStart = useRef(false);
 
   useEffect(() => {
     const focusPatternId = new URLSearchParams(window.location.search).get(
       "pattern",
     );
     const attempts = isSignedIn ? getAttempts(progress) : [];
+    const nextSession = generateDailySession(attempts, focusPatternId ?? undefined, {
+      patternProgressById,
+      reviewStats,
+    });
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSession(
-      generateDailySession(attempts, focusPatternId ?? undefined, {
-        patternProgressById,
-        reviewStats,
-      }),
-    );
-  }, [isSignedIn, patternProgressById, progress, reviewStats]);
+    setSession(nextSession);
+
+    if (isSignedIn && !isLoading && !trackedSessionStart.current) {
+      trackedSessionStart.current = true;
+      void trackDailyForgeStartedAction({
+        focusPatternId: focusPatternId ?? undefined,
+        stepCount: nextSession.steps.length,
+        problemCount: nextSession.problems.length,
+        estimatedMinutes: nextSession.estimatedTotalMinutes,
+        reviewOnlyStepCount:
+          nextSession.steps.length - nextSession.problems.length,
+      });
+    }
+  }, [isLoading, isSignedIn, patternProgressById, progress, reviewStats]);
 
   const firstStep = session.steps[0];
   const firstHref = firstStep?.href ?? (

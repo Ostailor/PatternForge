@@ -1,30 +1,33 @@
 # PatternForge
 
-PatternForge is a pattern-first coding interview training app. It helps users
-practice the work that comes before and around implementation: recognizing the
-right pattern, explaining the approach, writing code, testing with custom cases,
-reviewing mistakes, and building durable interview readiness over time.
+PatternForge helps you recognize, remember, and master coding interview
+patterns.
+
+It is a pattern-first interview training app built with Next.js, TypeScript,
+Tailwind, Clerk authentication, Prisma, and PostgreSQL. PatternForge focuses on
+the learning loop around coding interviews: recognizing the pattern, explaining
+the approach, practicing implementation, reviewing mistakes, pressure-testing
+with battles and mock interviews, and tracking readiness over time.
 
 PatternForge stores app-owned learning metadata only. It does not scrape
 LeetCode, call the LeetCode API, copy LeetCode problem statements, copy official
-examples, or submit anything to LeetCode. Seeded problems include titles,
-external links, difficulty, estimated time, recognition clues, common mistakes,
-and pattern relationships.
+examples, copy official constraints, submit to LeetCode, or claim official
+LeetCode judge results.
 
 ## Version History
 
 ### v0.0
 
 - Local-only Next.js prototype.
-- Pattern map, pattern detail pages, seeded problem metadata, and Daily Forge.
-- Browser-only progress in `localStorage`.
-- Practice flow with pattern recognition, reflection, XP, streaks, and mastery.
+- Seeded pattern map, pattern detail pages, Daily Forge, and practice flow.
+- Browser-only progress through `localStorage`.
+- Pattern recognition, reflection, XP, streaks, and mastery scoring.
 
 ### v0.1
 
 - Clerk authentication.
 - PostgreSQL persistence through Prisma.
-- `UserProfile` records mapped to Clerk user IDs.
+- `UserProfile` records mapped to authenticated users.
 - Database-backed attempts and dashboard stats.
 - Legacy local-progress import for `patternforge_attempts_v0`.
 
@@ -33,46 +36,41 @@ and pattern relationships.
 - AI Coach review for saved attempts.
 - Server-side AI provider abstraction.
 - Database-backed `AIReview`, `Mistake`, and `Flashcard` records.
-- AI-generated mistake cards and flashcards from user-provided attempt data.
+- AI-generated mistake cards and flashcards from user-provided attempt context.
 - Hint Mode with a five-level hint ladder.
-- Guardrails for ownership, malformed AI output, input length, and AI review
-  limits.
+- Ownership checks, malformed-output handling, input-size limits, and safe
+  fallback behavior.
 
 ### v0.3
 
 - Spaced repetition for flashcards and mistakes.
 - Daily Review queue at `/review`.
-- `ReviewLog` history for flashcard and mistake ratings.
-- Review completion summary with XP, ratings, reviewed patterns, and
-  rescheduled items.
+- `ReviewLog` history and review completion summaries.
 - Mistake Journal at `/mistakes` and flashcards page at `/flashcards`.
-- Mastery formula using attempts, AI explanation scores, review retention, and
+- Mastery scoring from attempts, AI explanation scores, retention, and
   confidence.
 
 ### v0.4
 
 - Boss Battles at `/battles`.
 - Active battle flow and battle summaries.
-- Daily quests, achievements, badges, and pattern levels.
-- Durable `GameEvent` XP ledger with stable event keys.
-- Dashboard widgets for active battles, quests, recent events, achievements,
-  and pattern progression.
+- Daily quests, achievements, badges, pattern levels, and XP rewards.
+- Durable `GameEvent` ledger with stable event keys.
+- Dashboard widgets for battles, quests, recent events, achievements, and
+  pattern progression.
 
 ### v0.5
 
 - Adaptive recommendation engine and Next Best Action dashboard card.
 - Database-backed recommendations, pattern insights, pattern confusions,
   learning plans, learning-plan steps, and recommendation feedback.
-- Weak-pattern scoring, pattern confusion detection, Adaptive Daily Forge,
-  Contrast Drills, Learning Plans, and Readiness Report.
-- Recommendation feedback loop for Helpful, Too Easy, Too Hard, Not Relevant,
-  and Dismiss.
+- Adaptive Daily Forge, Contrast Drills, Learning Plans, and Readiness Report.
+- Feedback loop for Helpful, Too Easy, Too Hard, Not Relevant, and Dismiss.
 
 ### v0.6
 
 - Interview Mode at `/interviews`.
-- Timed mock sessions for Single Problem, Focused Pattern, Mixed Interview, and
-  Weakness Repair interview types.
+- Single Problem, Focused Pattern, Mixed Interview, and Weakness Repair mocks.
 - Active interview runner at `/interviews/[interviewId]`.
 - Interview summary at `/interviews/[interviewId]/summary`.
 - Interview history at `/interviews/history`.
@@ -80,171 +78,207 @@ and pattern relationships.
 - Interview rubric scores, feedback, suggested mistakes, suggested flashcards,
   attempts, AI reviews, XP events, achievements, readiness data, and
   recommendations.
-- Global loading, error, and not-found states.
 
 ### v0.7
 
 - Code Workspace at `/problems/[problemId]/workspace`.
-- Reusable workspace components for practice, interview implementation rounds,
-  and boss battle rounds.
-- Python-only custom/self-test runner for the MVP.
-- Structured runner configs through `ProblemRunnerConfig`, with FreeRun mode
-  when a problem does not have structured metadata.
-- Custom test case builder with user-owned `TestCase` rows.
+- Reusable workspace for practice, interview rounds, and boss battle rounds.
+- Python-only custom/self-test runner for development and sandboxed production.
+- Structured runner configs through `ProblemRunnerConfig`.
+- User-owned custom `TestCase` rows.
 - Saved `CodeSubmission`, `CodeRun`, and `TestResult` history.
-- Debug Coach that reviews failed custom runs and saves `DebugInsight` rows.
+- Debug Coach for failed custom runs and saved `DebugInsight` rows.
 - Code History page at `/code/history`.
-- Practice, interview, and battle integrations that link code to attempts,
-  interview rounds, and battle rounds.
-- Readiness and recommendation signals from code execution.
+- Code execution signals in readiness and recommendations.
 
 ### v0.8
 
 - Voice Mode for Interview Mode.
-- Reusable voice UI components with recording, retry, transcript editing, text
-  fallback, skip, and privacy states.
+- Reusable voice UI with recording, retry, transcript editing, text fallback,
+  skip, and privacy states.
 - Transcript-first speech-to-text abstraction under `src/lib/voice`.
 - Optional browser speech playback for interviewer prompts.
-- Voice session, turn, feedback, and communication insight models.
-- AI interviewer prompt context that includes voice transcripts, saved
-  interview messages, phase answers, and code run results.
-- Communication scoring with clarity, structure, conciseness, transcript-based
-  confidence, and technical explanation scores.
-- Interview summary voice communication section.
-- Private transcript history route at
-  `/interviews/[interviewId]/transcript`.
-- Lightweight Speaking Practice Drills at `/drills/speaking`.
-- Readiness Report communication metrics.
-- Voice and speaking recommendations.
-- Voice XP events and achievements.
+- `VoiceSession`, `VoiceTurn`, `VoiceFeedback`, and communication insight
+  models.
+- Communication scoring for clarity, structure, conciseness, transcript-based
+  confidence, and technical explanation.
+- Private transcript history at `/interviews/[interviewId]/transcript`.
+- Speaking drills at `/drills/speaking`.
+- Voice-aware readiness metrics, recommendations, XP events, and achievements.
 
-## Voice Mode Behavior
+### v0.9
 
-Voice Mode enhances Interview Mode; it does not replace normal text input.
-Users can use voice in these phases:
+- First-time onboarding at `/onboarding`.
+- Lightweight diagnostic at `/onboarding/diagnostic`.
+- Personalized seven-day starting plan after onboarding or diagnostic.
+- User settings and privacy controls at `/settings`.
+- Data export at `/api/settings/export`.
+- Voice transcript, code submission, AI review, and learning-progress deletion
+  controls with typed confirmations.
+- Privacy-conscious product analytics through `AnalyticsEvent`.
+- Beta feedback widget and `UserFeedback` model.
+- Feature flags for risky beta surfaces.
+- Rate limits for AI, speech, code execution, and feedback.
+- AI route hardening helpers for input size, safe JSON parsing, redaction, and
+  prompt context construction.
+- Code runner production hardening with `CODE_RUNNER_MODE`.
+- Expanded metadata-only problem bank with 108 problems across 12 patterns.
+- Seed data validation script.
+- Focused unit, integration, code-runner, and data validation test commands.
+- Performance pass: dashboard payload bounds, paginated code/transcript/admin
+  lists, narrower Prisma selects, and additive performance indexes.
+- Deployment checklist at `docs/DEPLOYMENT.md`.
 
-- Clarifying Questions
-- Pattern Hypothesis
-- Approach
-- Implementation, optional narration only
-- Testing
-- Complexity
+## Onboarding Behavior
 
-Each phase still has the normal text form. If microphone access is unavailable,
-recording fails, transcription fails, or the user prefers typing, they can type
-the transcript manually and continue. Interview completion is not blocked by
-voice availability.
+The onboarding flow is available at `/onboarding` and requires authentication.
+It asks for:
 
-The correct pattern remains hidden until Pattern Hypothesis has been submitted.
-Voice transcripts are treated as user-provided text; the app does not infer
-tone, emotion, volume, pauses, or vocal confidence from audio.
+- Primary preparation goal.
+- LeetCode-style experience level.
+- Daily practice time.
+- Preferred language, currently Python.
+- Voice Mode preference.
+- Whether to take the diagnostic or start with a beginner plan.
 
-## Transcript Storage Behavior
+On finish, PatternForge creates or updates:
 
-PatternForge v0.8 is transcript-first.
+- `UserSettings`
+- `UserGoal`
+- `OnboardingState`
+- Optional `DiagnosticAssessment`
+- A personalized starting `LearningPlan`
 
-- Saved spoken turns are stored as `VoiceTurn` rows.
-- Raw audio is not stored by default.
-- `audioUrl` is optional and currently not required by the v0.8 flow.
-- Users can edit transcripts before saving.
-- Users can skip voice for any phase.
-- Users can abandon a voice session.
-- Users can delete saved voice transcripts and transcript-derived feedback for
-  an interview.
+Users who have completed onboarding are not forced through it again. Users who
+skip onboarding are marked `Skipped` and can still use the app.
 
-Privacy copy shown in the app:
+## Diagnostic Behavior
 
-> Voice Mode stores transcripts so PatternForge can give communication feedback.
-> Audio storage is optional and disabled by default.
+The diagnostic is intentionally lightweight for v0.9. It uses seeded
+PatternForge metadata only and does not show full problem statements.
 
-## Communication Scoring Rubric
+It asks:
 
-Communication scoring lives in `src/lib/ai/scoreCommunication.ts` and uses
-transcripts plus saved interview evidence. Scores are 1-100.
+- Pattern-recognition questions using title, difficulty, and recognition clues.
+- A 1-5 confidence check.
+- A pattern experience check.
 
-- Clarity: Was the explanation understandable?
-- Structure: Did the user organize the approach before details?
-- Conciseness: Did the user avoid unnecessary rambling?
-- Confidence: Did the transcript wording sound decisive? This is based only on
-  words in the transcript, not actual vocal tone.
-- Technical Explanation: Did the user explain the pattern, invariant, data
-  structures, tests, and complexity?
+On completion, it saves `DiagnosticAssessment` and `DiagnosticQuestion` rows,
+estimates the user level, recommends a start pattern, updates
+`UserSettings.currentLevel`, creates or refreshes the starting plan, and routes
+to the diagnostic result page.
 
-Communication insights include:
+## Starting Plan Behavior
 
-- `UnclearApproach`
-- `MissingInvariant`
-- `TooVerbose`
-- `TooQuietOrUncertain`
-- `StrongExplanation`
-- `WeakTestingExplanation`
-- `WeakComplexityExplanation`
-- `GoodTradeoffDiscussion`
+PatternForge creates a seven-day starting path from onboarding preferences and
+diagnostic signals:
 
-If transcript evidence is sparse, scoring should say that confidence in the
-communication score is limited.
+- Beginner: Arrays & Hashing, then Two Pointers and Sliding Window.
+- Some Experience: diagnostic weak pattern, review warmups, and contrast drills
+  when confusion is detected.
+- Interview Prep: weakest high-value pattern, Daily Forge, review, and later
+  Interview Mode.
+- Advanced: mixed practice, Boss Battle, or mock interview after baseline
+  diagnostic.
 
-## Speaking Drills
+The dashboard shows the starting path, today's step, and why the plan was
+chosen.
 
-Speaking Practice Drills are available at `/drills/speaking`.
+## Analytics And Privacy
 
-Drill types:
+Analytics are server-side where possible and are used for internal product
+quality only.
 
-- Explain a Pattern
-- Explain an Approach
-- Explain a Debugging Failure
-- Explain Complexity
+Tracked events include onboarding, diagnostic, Daily Forge, attempts, AI review,
+Daily Review, battles, interviews, code runs, voice turns, recommendations, and
+feedback.
 
-The drill flow is prompt, record or type answer, transcribe, score, show
-communication feedback, suggest improvement, and optionally create a flashcard
-or mistake. Speaking drills reuse the same voice controls and communication
-scoring rubric as Interview Mode.
+Analytics properties are sanitized before storage:
 
-## XP and Achievements
+- Allowed: IDs, counts, statuses, booleans, numeric scores, and short enum-like
+  strings.
+- Blocked: code, transcripts, prompts, answers, messages, reflections, stdout,
+  stderr, raw content, and other sensitive text fields.
 
-v0.8 adds these `GameEventType` values:
+Users can opt out through Settings. Voice transcripts are private to the
+authenticated user. Raw audio storage is disabled by default.
 
-- `VoiceInterviewCompleted`
-- `SpeakingDrillCompleted`
-- `CommunicationInsightCreated`
+## Feature Flags
 
-Voice XP rules:
+Feature flags live under `src/lib/feature-flags` and are controlled by
+environment variables:
 
-- +30 for completing a voice interview.
-- +15 for completing a speaking drill.
-- +20 for clarity score >= 80.
-- +20 for structure score >= 80.
-- +20 for technical explanation score >= 80.
-- +10 for using voice in all major interview phases.
+```bash
+PATTERNFORGE_FEATURE_AI_COACH="true"
+PATTERNFORGE_FEATURE_CODE_RUNNER="true"
+PATTERNFORGE_FEATURE_VOICE_MODE="true"
+PATTERNFORGE_FEATURE_INTERVIEWS="true"
+PATTERNFORGE_FEATURE_BOSS_BATTLES="true"
+PATTERNFORGE_FEATURE_RECOMMENDATIONS="true"
+PATTERNFORGE_FEATURE_ANALYTICS="true"
+PATTERNFORGE_FEATURE_BETA_FEEDBACK="true"
+PATTERNFORGE_FEATURE_ADMIN_TOOLS="false"
+```
 
-Duplicate XP is prevented through stable `GameEvent.eventKey` values based on
-source metadata such as `voiceSessionId`, `speakingDrillId`, and
-`communicationInsightId`.
+Accepted values include `true/false`, `1/0`, `yes/no`, `on/off`, and
+`enabled/disabled`. Disabled features should show clean unavailable states
+without breaking navigation.
 
-v0.8 achievements:
+## Rate Limits
 
-- First Spoken Forge: complete first voice interview.
-- Clear Explainer: clarity score >= 85.
-- Structured Thinker: structure score >= 85.
-- Pattern Narrator: technical explanation score >= 85.
-- Complexity Speaker: complete 5 complexity narration drills.
+Rate limiting lives under `src/lib/rate-limit`. Limits are in-memory for v0.9
+and configurable by environment variable:
 
-## Privacy Notes
+```bash
+PATTERNFORGE_RATE_LIMIT_AI_REVIEWS_PER_DAY="20"
+PATTERNFORGE_RATE_LIMIT_HINTS_PER_DAY="50"
+PATTERNFORGE_RATE_LIMIT_DEBUG_COACH_PER_DAY="30"
+PATTERNFORGE_RATE_LIMIT_AI_INTERVIEWER_PER_DAY="80"
+PATTERNFORGE_RATE_LIMIT_INTERVIEW_SCORING_PER_DAY="20"
+PATTERNFORGE_RATE_LIMIT_COMMUNICATION_SCORING_PER_DAY="40"
+PATTERNFORGE_RATE_LIMIT_VOICE_TRANSCRIPTIONS_PER_DAY="60"
+PATTERNFORGE_RATE_LIMIT_TEXT_TO_SPEECH_PER_DAY="200"
+PATTERNFORGE_RATE_LIMIT_CODE_RUNS_PER_DAY="100"
+PATTERNFORGE_RATE_LIMIT_FEEDBACK_PER_DAY="10"
+```
 
-- Voice transcripts are private to the authenticated user.
-- Users can only access their own voice sessions, turns, feedback, and
-  communication insights.
-- Transcript history is not public.
-- Transcripts are not used for social features.
-- Raw audio storage is off by default.
-- No provider API keys are exposed to the browser.
-- AI and speech provider calls that require secrets must stay server-side.
-- Browser speech playback may be used for local interviewer text playback and
-  does not require a provider key.
+Set a limit to `0` to temporarily disable that action.
+
+## Code Runner Production Notes
+
+`CODE_RUNNER_MODE` accepts:
+
+- `disabled`
+- `local-dev`
+- `sandbox`
+
+Production should use `disabled` or `sandbox`.
+
+```bash
+CODE_RUNNER_MODE="disabled"
+CODE_RUNNER_SANDBOX_URL=""
+CODE_RUNNER_SANDBOX_TOKEN=""
+```
+
+`local-dev` runs Python locally and is development-only. In production, local
+execution is blocked. If `sandbox` is selected without a configured sandbox
+provider, PatternForge disables execution and keeps code editing/saving
+available.
+
+The sandbox contract requires:
+
+- No network access.
+- No secret access.
+- No persistent filesystem access.
+- No arbitrary shell access from user input.
+- Strict timeouts.
+- Strict output limits.
+- Strict input limits.
+- Safe error messages.
+
+PatternForge does not provide official LeetCode judging.
 
 ## Environment Variables
-
-Create `.env` from `.env.example`.
 
 Required:
 
@@ -252,6 +286,13 @@ Required:
 DATABASE_URL="postgresql://patternforge:patternforge@localhost:5432/patternforge?schema=public"
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_replace_me"
 CLERK_SECRET_KEY="sk_test_replace_me"
+```
+
+Optional app metadata:
+
+```bash
+NEXT_PUBLIC_PATTERNFORGE_VERSION="0.9.0"
+PATTERNFORGE_VERSION="0.9.0"
 ```
 
 Optional AI provider settings:
@@ -263,14 +304,23 @@ AI_API_KEY="replace_with_server_side_key"
 AI_MODEL="replace_with_model_name"
 ```
 
+`OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` are also supported by
+the provider abstraction. Keep all AI keys server-side.
+
+Optional AI size control:
+
+```bash
+PATTERNFORGE_AI_MAX_PROMPT_CHARS="20000"
+```
+
 Optional speech settings:
 
 ```bash
 SPEECH_PROVIDER="mock"
 ```
 
-Supported v0.8 speech provider modes are `mock` and `local`. Both are
-development-safe and keep raw audio storage optional.
+Supported v0.9 speech provider modes are provider-agnostic; the default mock
+mode is safe for local development.
 
 ## Database Setup
 
@@ -280,56 +330,9 @@ PatternForge uses Prisma with PostgreSQL.
 2. Set `DATABASE_URL`.
 3. Install dependencies.
 4. Apply migrations.
-5. Seed the database.
+5. Seed PatternForge metadata.
 
-Commands:
-
-```bash
-npm install
-npx prisma migrate dev
-npm run db:seed
-```
-
-## Migrations
-
-Prisma migrations live under `prisma/migrations`.
-
-Important v0.8 migrations:
-
-- `20260603000000_add_voice_mode`
-- `20260603010000_add_voice_recommendation_types`
-- `20260603013000_add_voice_game_events`
-
-Validate the schema:
-
-```bash
-npx prisma validate
-```
-
-Check migration status against a reachable database:
-
-```bash
-npx prisma migrate status
-```
-
-Generate Prisma client:
-
-```bash
-npx prisma generate
-```
-
-## Seed Command
-
-```bash
-npm run db:seed
-```
-
-Seed data includes PatternForge-owned metadata only: titles, external links,
-difficulty, recognition clues, common mistakes, pattern relationships, runner
-configs, and achievements. It does not seed copied problem statements or
-official examples.
-
-## Run Locally
+Local setup:
 
 ```bash
 npm install
@@ -338,147 +341,217 @@ npm run db:seed
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Production migration:
 
-Useful checks:
+```bash
+npx prisma migrate deploy
+```
+
+## Migrations
+
+Prisma migrations live under `prisma/migrations`.
+
+Useful commands:
+
+```bash
+npx prisma validate
+npx prisma migrate status
+npx prisma generate
+```
+
+The v0.9 migration set includes onboarding/preferences, analytics/privacy,
+feedback, and performance indexes.
+
+## Seed Command
+
+```bash
+npm run db:seed
+```
+
+Seed data includes PatternForge-owned metadata only: pattern descriptions,
+recognition clues, common mistakes, problem titles, external LeetCode links,
+difficulty, estimated minutes, pattern relationships, runner configs, and
+achievements.
+
+Validate seed source data without a database:
+
+```bash
+npm run validate:data
+```
+
+## Testing Commands
+
+Default safe test suite:
 
 ```bash
 npm test
+```
+
+Other checks:
+
+```bash
+npm run typecheck
 npm run lint
 npm run build
 npx prisma validate
+npm run validate:data
+npm run test:integration
+npm run test:code-runner
 ```
 
-## How To Test Voice Mode
+Database integration tests are opt-in:
 
-1. Sign in.
-2. Start an interview at `/interviews`.
-3. Work through Clarifying Questions, Pattern Hypothesis, Approach, Testing,
-   and Complexity.
-4. Use Voice Mode in one or more phases.
-5. Confirm the transcript appears and can be edited.
-6. Submit the transcript, then continue the phase.
-7. Complete the interview.
-8. Open the summary page and verify the Voice Communication section.
-9. Open `/interviews/[interviewId]/transcript`.
-10. Confirm transcript filtering, copy, collapse/expand, feedback highlights,
-    and deletion controls.
+```bash
+npm run test:integration:db
+```
 
-Fallback checks:
+`test:code-runner` intentionally uses `CODE_RUNNER_MODE=local-dev` under
+`NODE_ENV=test`; do not use local-dev runner mode in production.
 
-- Deny microphone permission and type manually.
-- Use "Skip voice for this phase" and continue with normal text input.
-- Complete a normal text-only interview and confirm Voice Mode does not block
-  completion.
-- Use `/drills/speaking` and submit a typed transcript.
+## Deployment Checklist
+
+Use `docs/DEPLOYMENT.md` before opening v0.9 to beta users. It covers:
+
+- Environment variables.
+- Database migrations, seed, indexes, and backups.
+- Security checks.
+- AI and voice provider checks.
+- Observability, analytics, and feedback.
+- Smoke testing.
+- Rollback and kill switches.
+
+## Performance Notes
+
+v0.9 keeps beta-user pages bounded as usage grows:
+
+- Dashboard progress computes server-side mastery and XP from saved activity,
+  but sends only a recent attempt slice to the browser.
+- Code history, transcript history, and admin analytics are paginated.
+- Review queues and interview summaries use narrower Prisma selects.
+- Analytics trend rendering samples recent event rows defensively.
+- Additive performance indexes support user/time history, due reviews,
+  recommendations, code runs, voice turns, analytics, and feedback.
+
+Before increasing page sizes or adding dashboard widgets, profile against
+production-like row counts.
+
+## Security And Ownership
+
+Authenticated user data is scoped through `ensureCurrentUserProfile()` and
+`userProfileId` filters. Protected areas include attempts, AI reviews, mistakes,
+flashcards, reviews, battles, recommendations, interviews, code submissions,
+code runs, voice sessions, transcripts, feedback, settings, exports, and
+destructive controls.
+
+API keys remain server-side. The only `NEXT_PUBLIC_` values are public app
+configuration, such as the Clerk publishable key and optional app version.
+
+## Loading, Error, And Empty States
+
+v0.9 includes loading states for slow server-rendered pages such as dashboard
+data, pattern map, review, readiness, code history, admin analytics, interview
+summary, and transcript history. Feature-flagged or unavailable surfaces use
+clean disabled/unavailable states. New-user dashboard states point users toward
+onboarding, diagnostic, Daily Forge, review, and starting plan actions.
 
 ## What Is Intentionally Excluded
 
-- Video simulation.
 - Social features.
 - Leaderboards.
+- Paid subscriptions.
+- Mobile app.
 - Official LeetCode submissions.
 - LeetCode scraping.
+- LeetCode API usage.
 - Copied LeetCode problem statements.
-- Copied official LeetCode examples.
-- Official LeetCode execution or acceptance claims.
-- Raw audio storage by default.
+- Copied official examples.
+- Copied official constraints.
+- Official LeetCode judging or acceptance claims.
 - Public transcript sharing.
+- Raw audio storage by default.
 - Audio-based tone or emotion analysis.
 
-## Reliability Checklist
+## v0.9 Release Summary
 
-Before shipping a v0.8 branch:
+### What Changed In v0.9
 
-```bash
-npm test
-npm run lint
-npm run build
-npx prisma validate
-npx prisma migrate status
-```
+PatternForge v0.9 prepares the app for real beta users. It adds onboarding,
+diagnostic assessment, user preferences, personalized starting plans,
+settings/privacy controls, data export, destructive data controls, product
+analytics, feedback collection, feature flags, rate limits, AI safety helpers,
+code runner production gating, a larger legal-safe metadata bank, more tests,
+performance indexes, pagination, loading states, deployment documentation, and
+production-readiness verification.
 
-Also manually verify:
-
-- Authenticated users can access only their own interview, voice, transcript,
-  feedback, recommendation, and code-workspace data.
-- AI review, daily review, boss battles, recommendations, interviews, and code
-  workspace still work.
-- Voice controls have loading, error, empty, unavailable, permission, recording,
-  processing, ready, failed, saved, and text fallback states.
-- Communication feedback does not claim to hear tone or emotion.
-- No client component imports server-only AI provider code.
-
-## Roadmap
-
-### v0.9: Production Hardening, Onboarding, Analytics
-
-- Production onboarding for first-time users.
-- Better empty-state guided setup.
-- Operational analytics for activation, retention, review completion, interview
-  completion, code-run health, and voice-mode adoption.
-- More robust database migration and deployment playbooks.
-- Error monitoring and structured logs.
-- Rate limits and usage controls for AI and speech features.
-- Stronger data export/delete flows.
-- Broader automated coverage for server actions and critical user journeys.
-
-### v1.0: Full Learning System
-
-- Cohesive end-to-end learning loop across practice, review, interviews, code,
-  debugging, speaking, readiness, and recommendations.
-- Stable curriculum paths from beginner to interview-ready.
-- Production-grade personalization and mastery modeling.
-- Complete user controls for learning data and privacy.
-- Polished onboarding, guidance, and progress narrative.
-- Hardened release process and deployment posture.
-
-## v0.8 Summary
-
-v0.8 adds transcript-first Voice Mode, spoken mock interview practice,
-communication scoring, transcript history, speaking drills, readiness metrics,
-voice-aware recommendations, XP events, and achievements. Voice Mode is optional
-and does not block normal Interview Mode.
-
-## How To Test This Release
+### How To Test It
 
 Run:
 
 ```bash
 npm test
+npm run test:integration
+npm run test:code-runner
 npm run lint
-npm run build
+npm run validate:data
 npx prisma validate
+npm run build
+```
+
+With a reachable PostgreSQL database, also run:
+
+```bash
+npx prisma migrate deploy
+npm run db:seed
 npx prisma migrate status
 ```
 
-Then manually test:
+Manual smoke test:
 
-- Normal text-only interview.
-- Voice interview with transcripts.
-- Failed transcription with manual fallback.
-- Speaking drill with typed transcript.
-- Interview summary voice section.
-- Transcript history and deletion.
-- Readiness report communication metrics.
-- Dashboard recent voice game events.
-- Voice achievements after qualifying practice.
+- Sign up.
+- Complete onboarding.
+- Complete diagnostic.
+- Confirm starting path on dashboard.
+- Complete first attempt.
+- Request AI review.
+- Complete Daily Review.
+- Start and complete a Boss Battle round.
+- Accept or dismiss a recommendation.
+- Start and complete an interview.
+- Open interview summary.
+- Open Code Workspace and save code.
+- Run code only when sandbox mode is configured.
+- Use Voice Mode or text fallback.
+- Open Settings and export data.
+- Confirm dangerous controls require typed confirmation.
+- Submit beta feedback.
 
-## Known Limitations
+### Known Limitations
 
-- Speech-to-text is provider-agnostic but currently configured for mock/local
-  development modes.
-- Browser interviewer playback uses the Web Speech API when available.
-- Raw audio storage is intentionally not implemented by default.
-- Code execution is Python-only and uses PatternForge custom tests, not
-  official judge results.
-- Migration status requires a reachable PostgreSQL database.
-- Automated tests are mostly type/lint/build plus focused unit tests; more
-  route-level and server-action tests should be added before production.
+- Rate limits are in-memory for v0.9 and should move to durable storage before
+  multi-instance production scale.
+- Full account deletion is a manual support placeholder.
+- Speech provider integration is provider-agnostic and defaults to mock/local
+  behavior unless configured.
+- Raw audio storage is intentionally disabled by default.
+- Code execution is Python-only and requires a production sandbox for beta.
+- Admin analytics is intentionally simple and should use rollups or dedicated
+  reporting before high event volume.
+- E2E tests are not yet configured; current automated coverage is unit,
+  opt-in DB integration, code-runner, data validation, typecheck, lint, and
+  build.
 
-## Recommended v0.9 Scope
+### Recommended v1.0 Scope
 
-Focus v0.9 on production hardening: onboarding, analytics, migration/deployment
-runbooks, stronger automated test coverage, monitoring, rate limits, data
-controls, and smoother first-run states. Avoid expanding product surface until
-the v0.8 learning loops are reliable in production-like usage.
+v1.0 should focus on a beta-ready full learning system:
+
+- Harden multi-instance rate limiting and analytics storage.
+- Add E2E coverage for onboarding, diagnostic, attempt, review, battle,
+  interview, code workspace, voice fallback, settings, export, and feedback.
+- Add production monitoring, alerting, and error triage workflows.
+- Finish audited full account deletion.
+- Improve learning-plan iteration based on real beta telemetry.
+- Add deeper readiness calibration from real usage signals.
+- Polish first-session, empty-state, and recovery flows based on beta feedback.
+- Keep avoiding social, leaderboards, subscriptions, mobile app, LeetCode
+  scraping, official submissions, and copied content until the core learning
+  loop is stable.

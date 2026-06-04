@@ -7,6 +7,7 @@ import type {
 } from "@/generated/prisma/enums";
 import { requestStructuredJson } from "@/lib/ai/client";
 import { AIResponseParseError } from "@/lib/ai/errors";
+import { buildAIPromptContext } from "@/lib/ai/safety";
 import type {
   AIInterviewMessageInput,
   SuggestedFlashcard,
@@ -91,10 +92,6 @@ const RUBRIC_CATEGORIES: RubricCategory[] = [
   "Complexity",
   "TimeManagement",
 ];
-
-function serializeInput(input: unknown): string {
-  return JSON.stringify(input, null, 2);
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -563,9 +560,9 @@ function buildScoreInterviewMessages(input: ScoreInterviewInput) {
   "suggestedFlashcards": [
     { "front": string, "back": string }
   ]
-}`,
+        }`,
         "PatternForge interview scoring input:",
-        serializeInput(input),
+        buildAIPromptContext(input, { label: "Interview scoring context" }),
       ].join("\n\n"),
     },
   ];

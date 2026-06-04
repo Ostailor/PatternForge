@@ -8,6 +8,11 @@ import {
   MAX_TEST_INPUT_SIZE,
 } from "@/lib/code-runner/limits";
 import { STRUCTURED_RUNNER_NOT_CONFIGURED_MESSAGE } from "@/lib/code-runner/messages";
+import {
+  CODE_RUNNER_DISABLED_MESSAGE,
+  CODE_RUNNER_LOCAL_DEV_ONLY_MESSAGE,
+  CODE_RUNNER_SANDBOX_NOT_CONFIGURED_MESSAGE,
+} from "@/lib/code-runner/mode";
 import { runCode } from "@/lib/code-runner/runner";
 import type { ValidationResult } from "@/lib/code-runner/types";
 import { validateCodeRunRequest } from "@/lib/code-runner/validation";
@@ -20,6 +25,37 @@ function assertInvalid(result: ValidationResult) {
   }
 
   return result;
+}
+
+async function withEnv<T>(
+  values: Record<string, string | undefined>,
+  callback: () => Promise<T> | T,
+): Promise<T> {
+  const previousValues = Object.fromEntries(
+    Object.keys(values).map((key) => [key, process.env[key]]),
+  );
+
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) {
+      delete process.env[key];
+      continue;
+    }
+
+    process.env[key] = value;
+  }
+
+  try {
+    return await callback();
+  } finally {
+    for (const [key, value] of Object.entries(previousValues)) {
+      if (value === undefined) {
+        delete process.env[key];
+        continue;
+      }
+
+      process.env[key] = value;
+    }
+  }
 }
 
 test("validation rejects unsupported languages and over-limit payloads", () => {
@@ -117,6 +153,63 @@ test("python runner returns structured success and failure results", async () =>
   assert.equal(result.testResults[0]?.passed, true);
   assert.equal(result.testResults[1]?.passed, false);
   assert.deepEqual(result.testResults[1]?.actualOutputJson, 8);
+});
+
+test("code runner mode disables unsafe execution paths", async () => {
+  await withEnv(
+    {
+      CODE_RUNNER_MODE: "disabled",
+      NODE_ENV: "test",
+    },
+    async () => {
+      const result = await runCode({
+        language: "Python",
+        code: "def solve():\n    return 1\n",
+        functionName: "solve",
+        tests: [{ name: "case", inputJson: [], expectedOutputJson: 1 }],
+      });
+
+      assert.equal(result.status, "ValidationError");
+      assert.equal(result.errorMessage, CODE_RUNNER_DISABLED_MESSAGE);
+    },
+  );
+
+  await withEnv(
+    {
+      CODE_RUNNER_MODE: "local-dev",
+      NODE_ENV: "production",
+    },
+    async () => {
+      const result = await runCode({
+        language: "Python",
+        code: "def solve():\n    return 1\n",
+        functionName: "solve",
+        tests: [{ name: "case", inputJson: [], expectedOutputJson: 1 }],
+      });
+
+      assert.equal(result.status, "ValidationError");
+      assert.equal(result.errorMessage, CODE_RUNNER_LOCAL_DEV_ONLY_MESSAGE);
+    },
+  );
+
+  await withEnv(
+    {
+      CODE_RUNNER_MODE: "sandbox",
+      CODE_RUNNER_SANDBOX_URL: undefined,
+      NODE_ENV: "production",
+    },
+    async () => {
+      const result = await runCode({
+        language: "Python",
+        code: "def solve():\n    return 1\n",
+        functionName: "solve",
+        tests: [{ name: "case", inputJson: [], expectedOutputJson: 1 }],
+      });
+
+      assert.equal(result.status, "ValidationError");
+      assert.equal(result.errorMessage, CODE_RUNNER_SANDBOX_NOT_CONFIGURED_MESSAGE);
+    },
+  );
 });
 
 test("python runner handles syntax errors and runtime errors", async () => {

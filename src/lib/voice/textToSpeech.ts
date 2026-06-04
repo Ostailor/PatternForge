@@ -5,6 +5,7 @@ import type {
   TextToSpeechInput,
   TextToSpeechOutput,
 } from "@/lib/voice/types";
+import { checkRateLimit } from "@/lib/rate-limit/rateLimit";
 import { MAX_TRANSCRIPT_LENGTH } from "@/lib/voice/voiceLimits";
 
 function normalizeText(text: string): string {
@@ -41,6 +42,16 @@ export async function synthesizeInterviewerSpeech(
     return getTextOnlyFallback(
       `Interviewer text is longer than ${MAX_TRANSCRIPT_LENGTH.toLocaleString()} characters. Show text only.`,
     );
+  }
+
+  const rateLimit = await checkRateLimit({
+    kind: "textToSpeech",
+    userProfileId: input.userProfileId ?? null,
+    fallbackKey: "anonymous-tts",
+  });
+
+  if (!rateLimit.ok) {
+    return getTextOnlyFallback(rateLimit.message);
   }
 
   try {

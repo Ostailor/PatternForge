@@ -5,6 +5,9 @@ import { getProblemById } from "@/data/problems";
 import { generateHints } from "@/lib/ai/generateHints";
 import { buildFallbackHints } from "@/lib/ai/hints";
 import type { AIHintInput, AIHintOutput } from "@/lib/ai/types";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
+import { checkRateLimit } from "@/lib/rate-limit/rateLimit";
+import { ensureCurrentUserProfile } from "@/lib/user-profile";
 
 export type RequestHintsResult =
   | { status: "generated"; hints: AIHintOutput }
@@ -47,6 +50,21 @@ function buildHintInput(problemId: string): AIHintInput | null {
 export async function requestHintsAction(
   problemId: string,
 ): Promise<RequestHintsResult> {
+  if (!getFeatureFlag("aiCoach")) {
+    return { status: "invalid", message: "AI hints are temporarily unavailable." };
+  }
+
+  const userProfile = await ensureCurrentUserProfile();
+  const rateLimit = await checkRateLimit({
+    kind: "hints",
+    userProfileId: userProfile?.id ?? null,
+    fallbackKey: "anonymous-hints",
+  });
+
+  if (!rateLimit.ok) {
+    return { status: "invalid", message: rateLimit.message };
+  }
+
   const input = buildHintInput(problemId);
 
   if (!input) {

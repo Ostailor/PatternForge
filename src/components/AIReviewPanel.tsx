@@ -10,11 +10,13 @@ import type { Attempt } from "@/lib/types";
 type AIReviewPanelProps = {
   attempt: Attempt;
   hasLinkedWorkspaceCode?: boolean;
+  enabled?: boolean;
 };
 
 export default function AIReviewPanel({
   attempt,
   hasLinkedWorkspaceCode = false,
+  enabled = true,
 }: AIReviewPanelProps) {
   const [userCode, setUserCode] = useState("");
   const [userExplanation, setUserExplanation] = useState("");
@@ -32,6 +34,23 @@ export default function AIReviewPanel({
           ? "Not signed in"
           : "Review failed"
         : "Not reviewed yet";
+
+  if (!enabled) {
+    return (
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+          Coach Review
+        </p>
+        <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+          AI Coach is unavailable
+        </h2>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+          Coach Review is turned off for this beta environment. Your attempt is
+          still saved and can be reviewed later when the feature is enabled.
+        </p>
+      </section>
+    );
+  }
 
   async function requestReview() {
     if (isReviewing) {

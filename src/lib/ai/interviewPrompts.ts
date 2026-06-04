@@ -1,12 +1,9 @@
+import { buildAIPromptContext } from "@/lib/ai/safety";
 import type {
   AIInterviewFeedbackInput,
   AIInterviewerInput,
   AIPromptMessage,
 } from "@/lib/ai/types";
-
-function serializeInput(input: unknown): string {
-  return JSON.stringify(input, null, 2);
-}
 
 const interviewerSystemPrompt = [
   "You are the PatternForge AI Interviewer.",
@@ -60,9 +57,9 @@ export function buildInterviewerMessages(
   "phaseSuggestion": "Setup" | "ClarifyingQuestions" | "PatternHypothesis" | "Approach" | "Implementation" | "Testing" | "Complexity" | "Feedback" | null,
   "hintLevel": 1 | 2 | 3 | 4 | 5 | null,
   "concernFlags": string[]
-}`,
+        }`,
         "PatternForge interviewer input:",
-        serializeInput(input),
+        buildAIPromptContext(input, { label: "AI interviewer context" }),
       ].join("\n\n"),
     },
   ];
@@ -99,9 +96,9 @@ export function buildInterviewFeedbackMessages(
     "TimeManagement"?: number
   },
   "followUpRecommendations": string[]
-}`,
+        }`,
         "PatternForge completed interview input:",
-        serializeInput(input),
+        buildAIPromptContext(input, { label: "AI interview feedback context" }),
       ].join("\n\n"),
     },
   ];

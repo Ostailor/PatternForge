@@ -3,7 +3,7 @@ import {
   type Prisma,
 } from "@/generated/prisma/client";
 import { STRUCTURED_RUNNER_NOT_CONFIGURED_MESSAGE } from "@/lib/code-runner/messages";
-import { runPythonCode } from "@/lib/code-runner/pythonRunner";
+import { executeValidatedCodeRun } from "@/lib/code-runner/executor";
 import { createCodeRunResult } from "@/lib/code-runner/results";
 import { buildPythonHarnessSource } from "@/lib/code-runner/testHarness";
 import type {
@@ -276,7 +276,7 @@ export async function runStructuredTests(
     }
   }
 
-  return runPythonCode({
+  return executeValidatedCodeRun({
     language: config.language,
     code: userCode,
     functionName: config.functionName,

@@ -13,16 +13,18 @@ type VoiceTranscriptPageProps = {
   params: Promise<{ interviewId: string }>;
   searchParams: Promise<{
     voiceAction?: string;
+    page?: string;
   }>;
 };
 
-type InterviewForTranscript = NonNullable<
-  Awaited<ReturnType<typeof getInterviewForTranscript>>
->;
+type TranscriptData = NonNullable<Awaited<ReturnType<typeof getInterviewForTranscript>>>;
+type InterviewForTranscript = TranscriptData["interview"];
 type TranscriptMessage = InterviewForTranscript["messages"][number];
 type TranscriptVoiceTurn = InterviewForTranscript["voiceTurns"][number];
 type TranscriptInsight =
   InterviewForTranscript["voiceFeedbackRecords"][number]["communicationInsights"][number];
+
+const TRANSCRIPT_PAGE_SIZE = 40;
 
 const phaseOrder: InterviewPhase[] = [
   "Setup",
@@ -60,48 +62,26 @@ function normalizeEvidence(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
 
+function parsePage(value: string | undefined): number {
+  const page = Number.parseInt(value ?? "", 10);
+
+  return Number.isFinite(page) && page > 0 ? page : 1;
+}
+
 async function getInterviewForTranscript(
   interviewId: string,
   userProfileId: string,
+  page: number,
 ) {
-  return getPrisma().interviewSession.findFirst({
+  const prisma = getPrisma();
+  const interview = await prisma.interviewSession.findFirst({
     where: {
       id: interviewId,
       userProfileId,
     },
-    include: {
-      rounds: {
-        include: {
-          problem: true,
-        },
-        orderBy: {
-          roundNumber: "asc",
-        },
-      },
-      messages: {
-        include: {
-          interviewRound: {
-            include: {
-              problem: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "asc",
-        },
-      },
-      voiceTurns: {
-        include: {
-          interviewRound: {
-            include: {
-              problem: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "asc",
-        },
-      },
+    select: {
+      id: true,
+      title: true,
       voiceFeedbackRecords: {
         include: {
           communicationInsights: {
@@ -116,6 +96,144 @@ async function getInterviewForTranscript(
       },
     },
   });
+
+  if (!interview) {
+    return null;
+  }
+
+  const [messageRefs, voiceTurnRefs, totalVoiceTurns, interviewerMessageCount] =
+    await Promise.all([
+      prisma.interviewMessage.findMany({
+        where: {
+          interviewSessionId: interview.id,
+          role: {
+            not: "User",
+          },
+        },
+        select: {
+          id: true,
+          phase: true,
+          createdAt: true,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      }),
+      prisma.voiceTurn.findMany({
+        where: {
+          interviewSessionId: interview.id,
+          speaker: "User",
+        },
+        select: {
+          id: true,
+          phase: true,
+          createdAt: true,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      }),
+      prisma.voiceTurn.count({
+        where: {
+          interviewSessionId: interview.id,
+          speaker: "User",
+        },
+      }),
+      prisma.interviewMessage.count({
+        where: {
+          interviewSessionId: interview.id,
+          role: "Interviewer",
+        },
+      }),
+    ]);
+  const turnRefs = [
+    ...messageRefs.map((message) => ({
+      id: message.id,
+      source: "message" as const,
+      phase: message.phase,
+      createdAt: message.createdAt,
+    })),
+    ...voiceTurnRefs.map((turn) => ({
+      id: turn.id,
+      source: "voice" as const,
+      phase: turn.phase,
+      createdAt: turn.createdAt,
+    })),
+  ].sort((left, right) => {
+    const timeDelta = left.createdAt.getTime() - right.createdAt.getTime();
+
+    if (timeDelta !== 0) {
+      return timeDelta;
+    }
+
+    return getPhaseIndex(left.phase) - getPhaseIndex(right.phase);
+  });
+  const pageRefs = turnRefs.slice(
+    (page - 1) * TRANSCRIPT_PAGE_SIZE,
+    page * TRANSCRIPT_PAGE_SIZE,
+  );
+  const messageIds = new Set(
+    pageRefs
+      .filter((ref) => ref.source === "message")
+      .map((ref) => ref.id),
+  );
+  const voiceTurnIds = new Set(
+    pageRefs
+      .filter((ref) => ref.source === "voice")
+      .map((ref) => ref.id),
+  );
+  const [messages, voiceTurns] = await Promise.all([
+    messageIds.size > 0
+      ? prisma.interviewMessage.findMany({
+          where: {
+            id: {
+              in: Array.from(messageIds),
+            },
+          },
+          include: {
+            interviewRound: {
+              include: {
+                problem: true,
+              },
+            },
+          },
+        })
+      : [],
+    voiceTurnIds.size > 0
+      ? prisma.voiceTurn.findMany({
+          where: {
+            id: {
+              in: Array.from(voiceTurnIds),
+            },
+          },
+          include: {
+            interviewRound: {
+              include: {
+                problem: true,
+              },
+            },
+          },
+        })
+      : [],
+  ]);
+  const messageOrder = new Map(pageRefs.map((ref, index) => [ref.id, index]));
+
+  return {
+    interview: {
+      ...interview,
+      messages: messages.sort(
+        (left, right) =>
+          (messageOrder.get(left.id) ?? 0) - (messageOrder.get(right.id) ?? 0),
+      ),
+      voiceTurns: voiceTurns.sort(
+        (left, right) =>
+          (messageOrder.get(left.id) ?? 0) - (messageOrder.get(right.id) ?? 0),
+      ),
+    },
+    totalTranscriptTurns: turnRefs.length,
+    totalVoiceTurns,
+    interviewerMessageCount,
+  };
 }
 
 function toMessageTurn(message: TranscriptMessage) {
@@ -191,7 +309,7 @@ export default async function VoiceTranscriptPage({
   params,
   searchParams,
 }: VoiceTranscriptPageProps) {
-  const [{ interviewId }, { voiceAction }, userProfile] = await Promise.all([
+  const [{ interviewId }, { voiceAction, page: pageValue }, userProfile] = await Promise.all([
     params,
     searchParams,
     ensureCurrentUserProfile(),
@@ -201,16 +319,25 @@ export default async function VoiceTranscriptPage({
     return <UnauthenticatedTranscriptPage />;
   }
 
-  const interview = await getInterviewForTranscript(interviewId, userProfile.id);
+  const page = parsePage(pageValue);
+  const transcriptData = await getInterviewForTranscript(
+    interviewId,
+    userProfile.id,
+    page,
+  );
 
-  if (!interview) {
+  if (!transcriptData) {
     notFound();
   }
 
-  const voiceTurns = interview.voiceTurns.filter((turn) => turn.speaker === "User");
+  const { interview } = transcriptData;
   const transcriptTurns = getTranscriptTurns(interview);
   const insights = getInsights(interview);
   const phaseCounts = getPhaseCounts(transcriptTurns);
+  const pageCount = Math.max(
+    1,
+    Math.ceil(transcriptData.totalTranscriptTurns / TRANSCRIPT_PAGE_SIZE),
+  );
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -249,7 +376,7 @@ export default async function VoiceTranscriptPage({
         </div>
       </section>
 
-      {voiceTurns.length === 0 ? (
+      {transcriptData.totalVoiceTurns === 0 ? (
         <section className="mt-6 rounded-lg border border-dashed border-slate-300 bg-white p-6 shadow-sm">
           <p className="text-sm font-bold leading-6 text-slate-600">
             {voiceAction === "deleted"
@@ -281,31 +408,28 @@ export default async function VoiceTranscriptPage({
           </section>
 
           <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Voice turns" value={String(voiceTurns.length)} />
+            <StatCard
+              label="Voice turns"
+              value={String(transcriptData.totalVoiceTurns)}
+            />
+            <StatCard
+              label="Transcript turns"
+              value={String(transcriptData.totalTranscriptTurns)}
+            />
             <StatCard
               label="Interviewer messages"
-              value={String(
-                interview.messages.filter((message) => message.role === "Interviewer")
-                  .length,
-              )}
+              value={String(transcriptData.interviewerMessageCount)}
             />
             <StatCard
               label="Feedback insights"
               value={String(insights.length)}
-            />
-            <StatCard
-              label="Rounds linked"
-              value={String(
-                new Set(voiceTurns.map((turn) => turn.interviewRoundId).filter(Boolean))
-                  .size,
-              )}
             />
           </section>
 
           {phaseCounts.length > 0 ? (
             <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
-                Phases with transcript activity
+                Phases on this page
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {phaseCounts.map((item) => (
@@ -322,6 +446,31 @@ export default async function VoiceTranscriptPage({
 
           <section className="mt-6">
             <VoiceTranscriptClient turns={transcriptTurns} insights={insights} />
+            {pageCount > 1 ? (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-sm font-bold text-slate-600">
+                  Page {page} of {pageCount}
+                </p>
+                <div className="flex gap-2">
+                  {page > 1 ? (
+                    <Link
+                      href={`/interviews/${interview.id}/transcript?page=${page - 1}`}
+                      className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      Previous
+                    </Link>
+                  ) : null}
+                  {page < pageCount ? (
+                    <Link
+                      href={`/interviews/${interview.id}/transcript?page=${page + 1}`}
+                      className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-teal-700"
+                    >
+                      Next
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </section>
         </>
       )}

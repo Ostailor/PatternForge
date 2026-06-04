@@ -1,5 +1,6 @@
 import "server-only";
 
+import { buildAIPromptContext } from "@/lib/ai/safety";
 import type { AIPromptMessage } from "@/lib/ai/types";
 import type { DebugCoachInput } from "@/lib/ai/debugCoach";
 
@@ -15,10 +16,6 @@ const debugCoachSystemPrompt = [
   "If knownPatternName is null, discuss only observable implementation behavior and test output.",
   "Return valid JSON only. Do not wrap JSON in markdown.",
 ].join(" ");
-
-function serializeDebugInput(input: DebugCoachInput): string {
-  return JSON.stringify(input, null, 2);
-}
 
 export function buildDebugCoachMessages(
   input: DebugCoachInput,
@@ -45,9 +42,9 @@ export function buildDebugCoachMessages(
   "suggestedTestCase": { "name": string, "inputJson": unknown, "expectedOutputJson": unknown } | null,
   "suggestedFlashcard": { "front": string, "back": string } | null,
   "suggestedMistake": { "mistakeType": string, "description": string, "correction": string } | null
-}`,
+        }`,
         "PatternForge debug input:",
-        serializeDebugInput(input),
+        buildAIPromptContext(input, { label: "Debug Coach context" }),
       ].join("\n\n"),
     },
   ];

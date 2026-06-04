@@ -10,6 +10,7 @@ type TestCaseBuilderProps = {
   isSaving: boolean;
   isRunning: boolean;
   disabled: boolean;
+  executionDisabled?: boolean;
   fallbackMessage: string;
 };
 
@@ -25,6 +26,7 @@ export default function TestCaseBuilder({
   isSaving,
   isRunning,
   disabled,
+  executionDisabled = false,
   fallbackMessage,
 }: TestCaseBuilderProps) {
   function updateCase(
@@ -116,10 +118,18 @@ export default function TestCaseBuilder({
           <button
             type="button"
             onClick={onRunSelected}
-            disabled={isRunning || !testCases.some((testCase) => testCase.selected)}
+            disabled={
+              executionDisabled ||
+              isRunning ||
+              !testCases.some((testCase) => testCase.selected)
+            }
             className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isRunning ? "Running..." : "Run Selected Tests"}
+            {executionDisabled
+              ? "Execution Unavailable"
+              : isRunning
+                ? "Running..."
+                : "Run Selected Tests"}
           </button>
         </div>
       </div>

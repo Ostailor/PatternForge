@@ -7,6 +7,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { GameEventType } from "@/generated/prisma/enums";
 import type { InterviewPhase, RubricCategory } from "@/generated/prisma/enums";
 import { patterns } from "@/data/patterns";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
 import { requestAIInterviewerResponse } from "@/lib/ai/interviewer";
 import { scoreCommunication } from "@/lib/ai/scoreCommunication";
 import { scoreInterview } from "@/lib/ai/scoreInterview";
@@ -18,6 +20,7 @@ import type {
   AIInterviewerInput,
 } from "@/lib/ai/types";
 import { checkAchievementsWithClient } from "@/lib/achievements/service";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { createGameEventWithClient } from "@/lib/game/events";
 import { calculateInterviewRewards } from "@/lib/interviews/rewards";
 import { getPrisma } from "@/lib/prisma";
@@ -25,6 +28,7 @@ import {
   createAttemptForUserProfileWithClient,
   type CreateAttemptInput,
 } from "@/lib/progress-db";
+import { checkRateLimit } from "@/lib/rate-limit/rateLimit";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 import type { Confidence, SolvedStatus } from "@/lib/types";
 import { transcribeInterviewTurn } from "@/lib/voice/transcription";
@@ -93,6 +97,26 @@ type RoundForScoring = {
     }[];
   }[];
 };
+
+const MAX_INTERVIEW_PHASE_TEXT_LENGTH = 8_000;
+
+class RateLimitExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RateLimitExceededError";
+  }
+}
+
+async function assertRateLimit(
+  kind: Parameters<typeof checkRateLimit>[0]["kind"],
+  userProfileId: string,
+) {
+  const result = await checkRateLimit({ kind, userProfileId });
+
+  if (!result.ok) {
+    throw new RateLimitExceededError(result.message);
+  }
+}
 
 type InterviewForFinalization = {
   id: string;
@@ -266,12 +290,26 @@ function clampCommunicationScore(score: number): number {
   return Math.max(1, Math.min(100, Math.round(score)));
 }
 
-function requireText(value: string, message: string): string {
-  if (!value.trim()) {
+function normalizeInterviewText(value: string, label: string): string {
+  const trimmed = value.trim();
+
+  if (trimmed.length > MAX_INTERVIEW_PHASE_TEXT_LENGTH) {
+    throw new Error(
+      `${label} must be ${MAX_INTERVIEW_PHASE_TEXT_LENGTH.toLocaleString()} characters or fewer.`,
+    );
+  }
+
+  return trimmed;
+}
+
+function requireText(value: string, message: string, label = "Text"): string {
+  const trimmed = normalizeInterviewText(value, label);
+
+  if (!trimmed) {
     throw new Error(message);
   }
 
-  return value.trim();
+  return trimmed;
 }
 
 function readOptionalDate(formData: FormData, key: string): Date | undefined {
@@ -350,7 +388,7 @@ async function saveVoiceTurnIfAccepted({
   phase: InterviewPhase;
   transcript: string;
 }) {
-  if (!hasAcceptedVoiceTranscript(formData)) {
+  if (!getFeatureFlag("voiceMode") || !hasAcceptedVoiceTranscript(formData)) {
     return;
   }
 
@@ -366,7 +404,7 @@ async function saveVoiceTurnIfAccepted({
     interviewSessionId,
   });
 
-  await tx.voiceTurn.create({
+  const voiceTurn = await tx.voiceTurn.create({
     data: {
       voiceSessionId: voiceSession.id,
       interviewSessionId,
@@ -377,6 +415,21 @@ async function saveVoiceTurnIfAccepted({
       durationMs: readVoiceDurationMs(formData),
       startedAt: readOptionalDate(formData, "voiceStartedAt"),
       endedAt: readOptionalDate(formData, "voiceEndedAt"),
+    },
+  });
+  await trackEvent({
+    client: tx,
+    eventName: AnalyticsEvents.VoiceTurnSaved,
+    userProfileId,
+    properties: {
+      voiceTurnId: voiceTurn.id,
+      voiceSessionId: voiceSession.id,
+      interviewSessionId,
+      interviewRoundId,
+      phase,
+      speaker: "User",
+      durationMs: voiceTurn.durationMs ?? undefined,
+      transcriptLength: normalizedTranscript.length,
     },
   });
 }
@@ -437,12 +490,31 @@ async function hasInterviewRoundCodeRun({
 export async function transcribeInterviewVoiceTurnAction(
   formData: FormData,
 ): Promise<InterviewVoiceTranscriptionResult> {
+  if (!getFeatureFlag("voiceMode")) {
+    return {
+      status: "fallback",
+      message: "Voice Mode is temporarily unavailable. Type your answer manually.",
+    };
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
     return {
       status: "fallback",
       message: "Sign in to use Voice Mode, or type your answer manually.",
+    };
+  }
+
+  const rateLimit = await checkRateLimit({
+    kind: "speechTranscription",
+    userProfileId: userProfile.id,
+  });
+
+  if (!rateLimit.ok) {
+    return {
+      status: "fallback",
+      message: rateLimit.message,
     };
   }
 
@@ -1015,6 +1087,8 @@ async function finalizeInterview({
   interview: InterviewForFinalization;
   completedAt: Date;
 }) {
+  await assertRateLimit("interviewScoring", interview.userProfileId);
+
   const score = await scoreInterview({
     interviewType: interview.interviewType,
     durationMinutes: interview.durationMinutes,
@@ -1122,6 +1196,7 @@ async function finalizeInterview({
       followUpRecommendations: finalFeedback.followUpRecommendations,
     },
   });
+  await assertRateLimit("communicationScoring", interview.userProfileId);
   const communicationScore = await scoreCommunication(
     buildScoreCommunicationInput({
       interview,
@@ -1345,6 +1420,25 @@ async function finalizeInterview({
       xpBreakdown: rewards.breakdown,
     },
   );
+  await trackEvent({
+    client: tx,
+    eventName: AnalyticsEvents.InterviewCompleted,
+    userProfileId: interview.userProfileId,
+    properties: {
+      interviewId: interview.id,
+      interviewType: interview.interviewType,
+      result: score.result,
+      overallScore: score.overallScore,
+      communicationScore: communicationOverallScore,
+      patternRecognitionScore: score.PatternRecognition,
+      implementationScore: score.Implementation,
+      testingScore: score.Testing,
+      complexityScore: score.Complexity,
+      roundCount: interview.rounds.length,
+      voiceTurnCount: userVoiceTurns.length,
+      completedXp: rewards.completedXp,
+    },
+  });
   if (rewards.strongResult) {
     await createGameEventWithClient(
       tx,
@@ -1393,6 +1487,15 @@ export async function saveInterviewPhaseAction(formData: FormData) {
 
   if (!interviewId || !roundId || !phase) {
     redirect("/interviews");
+  }
+
+  const aiInterviewerLimit = await checkRateLimit({
+    kind: "aiInterviewer",
+    userProfileId: userProfile.id,
+  });
+
+  if (!aiInterviewerLimit.ok) {
+    redirect(`/interviews/${interviewId}?error=rate`);
   }
 
   try {
@@ -1478,6 +1581,7 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         const content = requireText(
           readString(formData, "clarifyingQuestions"),
           "Clarifying questions or assumptions are required.",
+          "Clarifying questions",
         );
 
         await saveVoiceTurnIfAccepted({
@@ -1512,6 +1616,7 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         const patternExplanation = requireText(
           readString(formData, "patternExplanation"),
           "Pattern explanation is required.",
+          "Pattern explanation",
         );
 
         if (!patterns.some((pattern) => pattern.id === selectedPatternId)) {
@@ -1554,6 +1659,7 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         const approachText = requireText(
           readString(formData, "approachText"),
           "Approach is required.",
+          "Approach",
         );
 
         const updatedRound = await tx.interviewRound.update({
@@ -1586,7 +1692,10 @@ export async function saveInterviewPhaseAction(formData: FormData) {
       }
 
       if (activePhase === "Implementation") {
-        const savedCodeText = readString(formData, "codeText");
+        const savedCodeText = normalizeInterviewText(
+          readString(formData, "codeText"),
+          "Implementation text",
+        );
         const hasWorkspaceCode = await hasInterviewRoundCodeSubmission({
           tx,
           userProfileId: userProfile.id,
@@ -1600,6 +1709,7 @@ export async function saveInterviewPhaseAction(formData: FormData) {
             : requireText(
                 savedCodeText,
                 "Implementation notes, code, or a saved workspace submission are required.",
+                "Implementation text",
               ));
 
         const updatedRound = await tx.interviewRound.update({
@@ -1632,7 +1742,10 @@ export async function saveInterviewPhaseAction(formData: FormData) {
       }
 
       if (activePhase === "Testing") {
-        const savedTestCasesText = readString(formData, "testCasesText");
+        const savedTestCasesText = normalizeInterviewText(
+          readString(formData, "testCasesText"),
+          "Testing text",
+        );
         const hasWorkspaceRun = await hasInterviewRoundCodeRun({
           tx,
           userProfileId: userProfile.id,
@@ -1646,6 +1759,7 @@ export async function saveInterviewPhaseAction(formData: FormData) {
             : requireText(
                 savedTestCasesText,
                 "Test cases, edge cases, or a saved workspace run are required.",
+                "Testing text",
               ));
 
         const updatedRound = await tx.interviewRound.update({
@@ -1682,6 +1796,7 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         const complexityText = requireText(
           readString(formData, "complexityText"),
           "Time and space complexity are required.",
+          "Complexity text",
         );
         const solvedStatus = readSolvedStatus(formData);
         const confidence = readConfidence(formData);
@@ -1821,8 +1936,12 @@ export async function saveInterviewPhaseAction(formData: FormData) {
         });
       }
     });
-  } catch {
-    redirect(`/interviews/${interviewId}?error=save`);
+  } catch (error) {
+    redirect(
+      `/interviews/${interviewId}?error=${
+        error instanceof RateLimitExceededError ? "rate" : "save"
+      }`,
+    );
   }
 
   revalidatePath("/interviews");

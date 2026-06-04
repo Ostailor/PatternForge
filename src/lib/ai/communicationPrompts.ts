@@ -1,9 +1,6 @@
+import { buildAIPromptContext } from "@/lib/ai/safety";
 import type { AIPromptMessage } from "@/lib/ai/types";
 import type { ScoreCommunicationInput } from "@/lib/ai/scoreCommunication";
-
-function serializeInput(input: unknown): string {
-  return JSON.stringify(input, null, 2);
-}
 
 export function buildCommunicationScoringMessages(
   input: ScoreCommunicationInput,
@@ -54,9 +51,9 @@ export function buildCommunicationScoringMessages(
       "evidence": { "phase"?: string, "quote"?: string, "reason"?: string }
     }
   ]
-}`,
+        }`,
         "PatternForge communication scoring input:",
-        serializeInput(input),
+        buildAIPromptContext(input, { label: "Communication scoring context" }),
       ].join("\n\n"),
     },
   ];

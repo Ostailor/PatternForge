@@ -10,7 +10,12 @@ import type {
 } from "@/components/code-workspace/types";
 import { TestCaseSource } from "@/generated/prisma/client";
 import { getProblemById, problems } from "@/data/problems";
+import {
+  getCodeExecutionUnavailableMessage,
+  isCodeExecutionAvailable,
+} from "@/lib/code-runner/executor";
 import { getRunnerConfig } from "@/lib/code-runner/runnerConfig";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 
@@ -300,12 +305,22 @@ export default async function ProblemWorkspacePage({
     returnHref,
     returnLabel,
   };
+  const codeRunnerEnabled =
+    getFeatureFlag("codeRunner") && isCodeExecutionAvailable();
+  const codeRunnerUnavailableMessage =
+    getFeatureFlag("codeRunner")
+      ? getCodeExecutionUnavailableMessage()
+      : "Code execution is temporarily unavailable.";
+  const aiCoachEnabled = getFeatureFlag("aiCoach");
 
   return (
     <CodeWorkspace
       problem={problem}
       context={context}
       runnerConfigured={Boolean(runnerConfig)}
+      codeRunnerEnabled={codeRunnerEnabled}
+      codeRunnerUnavailableMessage={codeRunnerUnavailableMessage ?? undefined}
+      aiCoachEnabled={aiCoachEnabled}
       initialHistory={history}
       initialTestCases={testCases}
       initialDebugInsight={latestDebugInsight}

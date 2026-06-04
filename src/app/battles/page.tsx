@@ -6,6 +6,7 @@ import {
   startPatternBossAction,
   startReviewGauntletAction,
 } from "@/app/battles/actions";
+import FeatureUnavailable from "@/components/FeatureUnavailable";
 import MasteryBadge from "@/components/MasteryBadge";
 import ProgressBar from "@/components/ProgressBar";
 import { patterns } from "@/data/patterns";
@@ -20,6 +21,7 @@ import {
   getMasteryLevelNumber,
   isMasterTier,
 } from "@/lib/mastery";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import { getAttempts } from "@/lib/progress";
 import { getCurrentUserProgressSnapshot } from "@/lib/progress-db";
@@ -254,6 +256,16 @@ async function getBattleDashboardData(userProfileId: string) {
 }
 
 export default async function BattlesPage({ searchParams }: BattlesPageProps) {
+  if (!getFeatureFlag("bossBattles")) {
+    return (
+      <FeatureUnavailable
+        eyebrow="Boss Battles"
+        title="Boss Battles are unavailable"
+        description="Pressure-test practice is turned off for this beta environment. You can still use Daily Forge, reviews, and regular pattern practice."
+      />
+    );
+  }
+
   const [userProfile, resolvedSearchParams] = await Promise.all([
     ensureCurrentUserProfile(),
     searchParams,
@@ -431,7 +443,9 @@ export default async function BattlesPage({ searchParams }: BattlesPageProps) {
 
 function BattleAlert({ error }: { error: string }) {
   const message =
-    error === "locked"
+    error === "disabled"
+      ? "Boss Battles are temporarily unavailable."
+      : error === "locked"
       ? "Build a little more practice history before starting this battle."
       : error === "signin"
         ? "Sign in before creating or resuming battles."

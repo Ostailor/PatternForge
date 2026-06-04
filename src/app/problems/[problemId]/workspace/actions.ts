@@ -10,11 +10,14 @@ import {
   TestCaseSource,
   type Prisma,
 } from "@/generated/prisma/client";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
 import {
   requestDebugCoach,
   type DebugCoachOutput,
 } from "@/lib/ai/debugCoach";
 import { STRUCTURED_RUNNER_NOT_CONFIGURED_MESSAGE } from "@/lib/code-runner/messages";
+import { getCodeExecutionUnavailableMessage } from "@/lib/code-runner/executor";
 import { runCode } from "@/lib/code-runner/runner";
 import {
   getRunnerConfig,
@@ -28,7 +31,9 @@ import {
   MAX_TESTS_PER_RUN,
 } from "@/lib/code-runner/limits";
 import type { CodeRunResult, CodeRunnerTestCase } from "@/lib/code-runner/types";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
+import { checkRateLimit } from "@/lib/rate-limit/rateLimit";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 
 export type WorkspaceMode = "Practice" | "Interview" | "Battle";
@@ -844,10 +849,26 @@ export async function saveWorkspaceTestCasesAction(
 export async function runWorkspaceCodeAction(
   input: WorkspaceRunActionInput,
 ): Promise<WorkspaceRunActionResult> {
+  if (!getFeatureFlag("codeRunner")) {
+    return {
+      status: "invalid",
+      message: "Code runner is temporarily unavailable.",
+    };
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
     return { status: "unauthenticated", message: "Sign in before running code." };
+  }
+
+  const rateLimit = await checkRateLimit({
+    kind: "codeRuns",
+    userProfileId: userProfile.id,
+  });
+
+  if (!rateLimit.ok) {
+    return { status: "invalid", message: rateLimit.message };
   }
 
   if (!isRecord(input)) {
@@ -862,6 +883,12 @@ export async function runWorkspaceCodeAction(
 
   if (codeError) {
     return { status: "invalid", message: codeError };
+  }
+
+  const unavailableMessage = getCodeExecutionUnavailableMessage();
+
+  if (unavailableMessage) {
+    return { status: "invalid", message: unavailableMessage };
   }
 
   if (!isWorkspaceRunType(input.runType)) {
@@ -908,6 +935,20 @@ export async function runWorkspaceCodeAction(
     codeSubmissionId: savedSubmission.submission.id,
     runType: input.runType,
   });
+  await trackEvent({
+    eventName: AnalyticsEvents.CodeRunStarted,
+    userProfileId: userProfile.id,
+    properties: {
+      codeRunId: pendingRun.id,
+      codeSubmissionId: savedSubmission.submission.id,
+      problemId: input.problemId,
+      runType: input.runType,
+      testCount: runnableTests.tests.length,
+      attemptId: context.context.attemptId,
+      interviewRoundId: context.context.interviewRoundId,
+      battleRoundId: context.context.battleRoundId,
+    },
+  });
 
   let result: CodeRunResult;
 
@@ -932,6 +973,24 @@ export async function runWorkspaceCodeAction(
   const run = await updateRunWithResults({
     codeRunId: pendingRun.id,
     result,
+  });
+  await trackEvent({
+    eventName: AnalyticsEvents.CodeRunCompleted,
+    userProfileId: userProfile.id,
+    properties: {
+      codeRunId: run.id,
+      codeSubmissionId: savedSubmission.submission.id,
+      problemId: input.problemId,
+      runType: input.runType,
+      status: run.status,
+      runtimeMs: run.runtimeMs ?? undefined,
+      testCount: result.testResults.length,
+      passedTestCount: result.testResults.filter((testResult) => testResult.passed)
+        .length,
+      attemptId: context.context.attemptId,
+      interviewRoundId: context.context.interviewRoundId,
+      battleRoundId: context.context.battleRoundId,
+    },
   });
 
   const submissionForHistory = await getPrisma().codeSubmission.findUniqueOrThrow({
@@ -960,11 +1019,27 @@ export async function runWorkspaceCodeAction(
 export async function createDebugInsightAction(
   codeRunId: string,
 ): Promise<CreateDebugInsightActionResult> {
+  if (!getFeatureFlag("aiCoach")) {
+    return {
+      status: "invalid",
+      message: "Debug Coach is temporarily unavailable.",
+    };
+  }
+
   const userProfile = await ensureCurrentUserProfile();
   const scopedCodeRunId = readNonEmpty(codeRunId);
 
   if (!userProfile) {
     return { status: "unauthenticated", message: "Sign in before using Debug Coach." };
+  }
+
+  const rateLimit = await checkRateLimit({
+    kind: "debugCoach",
+    userProfileId: userProfile.id,
+  });
+
+  if (!rateLimit.ok) {
+    return { status: "invalid", message: rateLimit.message };
   }
 
   if (!scopedCodeRunId) {
@@ -1057,13 +1132,10 @@ export async function createDebugInsightAction(
       runtimeError: run.errorMessage,
       previousAttemptReflection,
     });
-  } catch (error) {
+  } catch {
     return {
       status: "invalid",
-      message:
-        error instanceof Error
-          ? error.message
-          : "Debug Coach could not review this run.",
+      message: "Debug Coach could not review this run. Try again later.",
     };
   }
 

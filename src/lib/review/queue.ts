@@ -143,11 +143,30 @@ export async function getDueFlashcards(
         lte: now,
       },
     },
-    include: {
-      pattern: true,
+    select: {
+      id: true,
+      patternId: true,
+      front: true,
+      back: true,
+      reviewDueAt: true,
+      lastReviewedAt: true,
+      intervalDays: true,
+      easeFactor: true,
+      repetitions: true,
+      lapses: true,
+      status: true,
+      pattern: {
+        select: {
+          name: true,
+        },
+      },
       sourceAttempt: {
-        include: {
-          problem: true,
+        select: {
+          problem: {
+            select: {
+              title: true,
+            },
+          },
         },
       },
     },
@@ -174,9 +193,28 @@ export async function getDueMistakes(
         lte: now,
       },
     },
-    include: {
-      pattern: true,
-      problem: true,
+    select: {
+      id: true,
+      patternId: true,
+      description: true,
+      correction: true,
+      reviewDueAt: true,
+      lastReviewedAt: true,
+      intervalDays: true,
+      easeFactor: true,
+      repetitions: true,
+      lapses: true,
+      status: true,
+      pattern: {
+        select: {
+          name: true,
+        },
+      },
+      problem: {
+        select: {
+          title: true,
+        },
+      },
     },
     orderBy: { reviewDueAt: "asc" },
     take: limit,
@@ -258,21 +296,43 @@ async function getRecentReviewLogs(userProfileId: string, now = new Date()) {
         gte: getRecentReviewWindow(now),
       },
     },
-    include: {
+    select: {
+      id: true,
+      itemType: true,
+      rating: true,
+      reviewedAt: true,
       flashcard: {
-        include: {
-          pattern: true,
+        select: {
+          pattern: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
           sourceAttempt: {
-            include: {
-              problem: true,
+            select: {
+              problem: {
+                select: {
+                  title: true,
+                },
+              },
             },
           },
         },
       },
       mistake: {
-        include: {
-          pattern: true,
-          problem: true,
+        select: {
+          pattern: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          problem: {
+            select: {
+              title: true,
+            },
+          },
         },
       },
     },
@@ -293,21 +353,41 @@ export async function getRecentReviewHistory(
     where: {
       userProfileId: scopedUserProfileId,
     },
-    include: {
+    select: {
+      id: true,
+      itemType: true,
+      rating: true,
+      reviewedAt: true,
       flashcard: {
-        include: {
-          pattern: true,
+        select: {
+          pattern: {
+            select: {
+              name: true,
+            },
+          },
           sourceAttempt: {
-            include: {
-              problem: true,
+            select: {
+              problem: {
+                select: {
+                  title: true,
+                },
+              },
             },
           },
         },
       },
       mistake: {
-        include: {
-          pattern: true,
-          problem: true,
+        select: {
+          pattern: {
+            select: {
+              name: true,
+            },
+          },
+          problem: {
+            select: {
+              title: true,
+            },
+          },
         },
       },
     },

@@ -11,18 +11,14 @@ import {
 import { DAILY_AI_REVIEW_LIMIT } from "@/lib/ai-review-limits";
 import type { AIReviewOutput } from "@/lib/ai/types";
 import { getPrisma } from "@/lib/prisma";
-import { createAttemptForUserProfile } from "@/lib/progress-db";
 
-const requiredDatabaseUrl = process.env.DATABASE_URL;
+const runDatabaseTests = process.env.PATTERNFORGE_RUN_DB_TESTS === "1";
+const dbTest = runDatabaseTests ? test : test.skip;
 const testAuthUserIds = [
   "owner-test-user",
   "other-test-user",
   "daily-limit-user",
 ];
-
-if (!requiredDatabaseUrl) {
-  throw new Error("DATABASE_URL is required for AI review integration tests.");
-}
 
 const fakeReview: AIReviewOutput = {
   patternScore: 8,
@@ -66,19 +62,28 @@ async function createUser(authUserId: string) {
   });
 }
 
-test("AI review saves review, mistake, and flashcard for the owning user only", async () => {
+async function createAttempt(userProfileId: string) {
+  return getPrisma().attempt.create({
+    data: {
+      userProfileId,
+      problemId: "two-sum",
+      selectedPatternId: "arrays-hashing",
+      correctPatternId: "arrays-hashing",
+      wasPatternCorrect: true,
+      solvedStatus: "Solved",
+      timeSpentMinutes: 12,
+      confidence: 4,
+      reflection: "I used a hash map to avoid a nested scan.",
+    },
+  });
+}
+
+dbTest("AI review saves review, mistake, and flashcard for the owning user only", async () => {
   await resetUserData();
 
   const owner = await createUser("owner-test-user");
   const otherUser = await createUser("other-test-user");
-  const attempt = await createAttemptForUserProfile(owner.id, {
-    problemId: "two-sum",
-    selectedPatternId: "arrays-hashing",
-    solvedStatus: "Solved",
-    timeSpentMinutes: 12,
-    confidence: 4,
-    reflection: "I used a hash map to avoid a nested scan.",
-  });
+  const attempt = await createAttempt(owner.id);
 
   const review = await createAIReviewForUserProfile(
     {
@@ -130,18 +135,11 @@ test("AI review saves review, mistake, and flashcard for the owning user only", 
   );
 });
 
-test("AI review enforces the per-user daily review limit", async () => {
+dbTest("AI review enforces the per-user daily review limit", async () => {
   await resetUserData();
 
   const owner = await createUser("daily-limit-user");
-  const attempt = await createAttemptForUserProfile(owner.id, {
-    problemId: "two-sum",
-    selectedPatternId: "arrays-hashing",
-    solvedStatus: "Solved",
-    timeSpentMinutes: 10,
-    confidence: 4,
-    reflection: "I used a hash map.",
-  });
+  const attempt = await createAttempt(owner.id);
 
   for (let index = 0; index < DAILY_AI_REVIEW_LIMIT; index += 1) {
     await createAIReviewForUserProfile(

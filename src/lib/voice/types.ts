@@ -32,6 +32,7 @@ export type TextToSpeechInput = {
   text: string;
   voice?: string;
   speed?: number;
+  userProfileId?: string;
 };
 
 export type TextToSpeechOutput = {

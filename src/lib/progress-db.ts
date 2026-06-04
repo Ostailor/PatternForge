@@ -9,6 +9,8 @@ import {
   checkAchievementsWithClient,
   getAchievementCatalog,
 } from "@/lib/achievements/service";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
 import { summarizeBattleStats } from "@/lib/battles/dashboard";
 import {
   getGamificationStats,
@@ -26,6 +28,7 @@ import { getPrisma } from "@/lib/prisma";
 import { progressFromAttempts } from "@/lib/progress";
 import { generateDailyQuests } from "@/lib/quests/generateDailyQuests";
 import { updateQuestProgress } from "@/lib/quests/updateQuestProgress";
+import { STARTING_PATH_TITLE } from "@/lib/learning-plans/startingPath";
 import {
   toDashboardRecommendation,
   type DashboardRecommendation,
@@ -42,6 +45,32 @@ import type {
   UserProgress,
 } from "@/lib/types";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
+
+const DASHBOARD_PROGRESS_ATTEMPT_LIMIT = 120;
+
+export type DashboardOnboardingState = {
+  status: string;
+  currentStep: string;
+  completedAt: string | null;
+  skippedAt: string | null;
+};
+
+export type DashboardStartingPath = {
+  planId: string;
+  title: string;
+  whyChosen: string;
+  todayStep: {
+    id: string;
+    dayIndex: number;
+    stepType: string;
+    title: string;
+    targetPatternId: string | null;
+    targetPatternName: string | null;
+    problemId: string | null;
+    problemTitle: string | null;
+    dueDate: string;
+  } | null;
+};
 
 export type CreateAttemptInput = {
   problemId: string;
@@ -132,6 +161,8 @@ export type UserProgressSnapshot = {
   dailyQuests: Awaited<ReturnType<typeof generateDailyQuests>> | null;
   dashboardGamification: DashboardGamificationData | null;
   nextBestAction: DashboardRecommendation | null;
+  onboardingState: DashboardOnboardingState | null;
+  startingPath: DashboardStartingPath | null;
 };
 
 export type ImportAttemptsResult = {
@@ -897,14 +928,27 @@ function getEvidenceFromMetadata(metadata: Record<string, unknown>): string[] {
     : [];
 }
 
+function limitProgressForDashboard(
+  progress: UserProgress,
+  limit = DASHBOARD_PROGRESS_ATTEMPT_LIMIT,
+): UserProgress {
+  const attemptLog = progress.attemptLog ?? Object.values(progress.attempts);
+  const recentAttempts = attemptLog.slice(-limit);
+
+  return {
+    ...progress,
+    attemptLog: recentAttempts,
+    attempts: recentAttempts.reduce<Record<string, Attempt>>((byProblem, attempt) => {
+      byProblem[attempt.problemId] = attempt;
+      return byProblem;
+    }, {}),
+  };
+}
+
 async function getDashboardNextBestAction(
   userProfileId: string,
 ): Promise<DashboardRecommendation | null> {
-  const { saveRecommendations } = await import("@/lib/recommendations/engine");
-
-  await saveRecommendations(userProfileId);
-
-  const recommendation = await getPrisma().recommendation.findFirst({
+  let recommendation = await getPrisma().recommendation.findFirst({
     where: {
       userProfileId,
       status: "Active",
@@ -923,6 +967,31 @@ async function getDashboardNextBestAction(
     },
     orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
   });
+
+  if (!recommendation) {
+    const { saveRecommendations } = await import("@/lib/recommendations/engine");
+
+    await saveRecommendations(userProfileId);
+    recommendation = await getPrisma().recommendation.findFirst({
+      where: {
+        userProfileId,
+        status: "Active",
+      },
+      select: {
+        id: true,
+        title: true,
+        reason: true,
+        recommendationType: true,
+        priority: true,
+        targetPatternId: true,
+        secondaryPatternId: true,
+        problemId: true,
+        battleType: true,
+        metadata: true,
+      },
+      orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
+    });
+  }
 
   if (!recommendation) {
     return null;
@@ -946,6 +1015,57 @@ async function getDashboardNextBestAction(
   return toDashboardRecommendation(savedRecommendation);
 }
 
+async function getDashboardStartingPath(
+  userProfileId: string,
+): Promise<DashboardStartingPath | null> {
+  const plan = await getPrisma().learningPlan.findFirst({
+    where: {
+      userProfileId,
+      title: STARTING_PATH_TITLE,
+      status: "Active",
+    },
+    include: {
+      steps: {
+        include: {
+          targetPattern: { select: { name: true } },
+          problem: { select: { title: true } },
+        },
+        orderBy: [{ status: "asc" }, { dayIndex: "asc" }],
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  if (!plan) {
+    return null;
+  }
+
+  const todayStep =
+    plan.steps.find((step) => step.status === "Active") ??
+    plan.steps.find((step) => step.status === "Pending") ??
+    plan.steps[0] ??
+    null;
+
+  return {
+    planId: plan.id,
+    title: plan.title,
+    whyChosen: plan.goal,
+    todayStep: todayStep
+      ? {
+          id: todayStep.id,
+          dayIndex: todayStep.dayIndex,
+          stepType: todayStep.stepType,
+          title: todayStep.title,
+          targetPatternId: todayStep.targetPatternId,
+          targetPatternName: todayStep.targetPattern?.name ?? null,
+          problemId: todayStep.problemId,
+          problemTitle: todayStep.problem?.title ?? null,
+          dueDate: todayStep.dueDate.toISOString(),
+        }
+      : null,
+  };
+}
+
 export async function getCurrentUserProgressSnapshot(
   patternId?: string,
 ): Promise<UserProgressSnapshot> {
@@ -961,19 +1081,36 @@ export async function getCurrentUserProgressSnapshot(
       dailyQuests: null,
       dashboardGamification: null,
       nextBestAction: null,
+      onboardingState: null,
+      startingPath: null,
     };
   }
 
   const progress = progressFromAttempts(attempts);
   const userProfile = await ensureCurrentUserProfile();
-  const [reviewStats, reviewActivities, patternInputMap, dailyQuests] = userProfile
+  const [
+    reviewStats,
+    reviewActivities,
+    patternInputMap,
+    dailyQuests,
+    onboardingState,
+  ] = userProfile
     ? await Promise.all([
         getReviewStats(userProfile.id),
         getReviewXpActivities(userProfile.id),
         getPatternMasteryInputMap(userProfile.id),
         generateDailyQuests(userProfile.id),
+        getPrisma().onboardingState.findUnique({
+          where: { userProfileId: userProfile.id },
+          select: {
+            status: true,
+            currentStep: true,
+            completedAt: true,
+            skippedAt: true,
+          },
+        }),
       ])
-    : [null, [], createPatternMasteryInputMap(), null];
+    : [null, [], createPatternMasteryInputMap(), null, null];
   const patternProgressById = getPatternProgressById(progress, patternInputMap);
 
   const dashboardStats = getGamificationStats(attempts, {
@@ -983,7 +1120,7 @@ export async function getCurrentUserProgressSnapshot(
       reviewStats.reviewedTodayCount > 0 &&
       reviewStats.totalDueCount === 0,
   });
-  const [totalXp, dashboardGamification, nextBestAction] = userProfile
+  const [totalXp, dashboardGamification, nextBestAction, startingPath] = userProfile
     ? await Promise.all([
         getTotalXP(userProfile.id),
         getDashboardGamificationData({
@@ -992,11 +1129,12 @@ export async function getCurrentUserProgressSnapshot(
           patternProgressById,
         }),
         getDashboardNextBestAction(userProfile.id),
+        getDashboardStartingPath(userProfile.id),
       ])
-    : [dashboardStats.xp, null, null];
+    : [dashboardStats.xp, null, null, null];
 
   return {
-    progress,
+    progress: limitProgressForDashboard(progress),
     dashboardStats: userProfile
       ? {
           ...dashboardStats,
@@ -1021,6 +1159,15 @@ export async function getCurrentUserProgressSnapshot(
     dailyQuests,
     dashboardGamification,
     nextBestAction,
+    onboardingState: onboardingState
+      ? {
+          status: onboardingState.status,
+          currentStep: onboardingState.currentStep,
+          completedAt: onboardingState.completedAt?.toISOString() ?? null,
+          skippedAt: onboardingState.skippedAt?.toISOString() ?? null,
+      }
+      : null,
+    startingPath,
   };
 }
 
@@ -1118,6 +1265,22 @@ export async function createAttemptForUserProfileWithClient(
       solvedStatus: appAttempt.solvedStatus,
     },
   );
+  await trackEvent({
+    client,
+    eventName: AnalyticsEvents.AttemptCompleted,
+    userProfileId,
+    properties: {
+      attemptId: attempt.id,
+      problemId: attempt.problemId,
+      selectedPatternId: attempt.selectedPatternId,
+      correctPatternId: attempt.correctPatternId,
+      wasPatternCorrect: attempt.wasPatternCorrect,
+      solvedStatus: appAttempt.solvedStatus,
+      confidence: attempt.confidence,
+      timeSpentMinutes: attempt.timeSpentMinutes,
+      linkedCodeSubmission: Boolean(input.codeSubmissionId?.trim()),
+    },
+  });
   await updatePatternConfusionOnAttemptWithClient(
     client,
     userProfileId,

@@ -27,11 +27,13 @@ const statusStyles: Record<string, string> = {
 };
 
 const stepTypeLabels: Record<string, string> = {
+  DailyForge: "Daily Forge",
   Review: "Review",
   FocusProblem: "Focus Problem",
   MixedProblem: "Mixed Problem",
   ContrastDrill: "Contrast Drill",
   BossBattle: "Boss Battle",
+  MockInterview: "Mock Interview",
   Reflection: "Reflection",
 };
 
@@ -55,6 +57,8 @@ function formatDate(dateValue: string | null): string {
 
 function getStepHref(step: LearningPlanStep): string | null {
   switch (step.stepType) {
+    case "DailyForge":
+      return `/forge${step.targetPatternId ? `?pattern=${step.targetPatternId}` : ""}`;
     case "Review":
       return "/review";
     case "FocusProblem":
@@ -68,6 +72,10 @@ function getStepHref(step: LearningPlanStep): string | null {
       return step.targetPatternId
         ? `/battles?pattern=${step.targetPatternId}`
         : "/battles";
+    case "MockInterview":
+      return step.targetPatternId
+        ? `/interviews?pattern=${step.targetPatternId}`
+        : "/interviews";
     case "Reflection":
       return "/patterns";
     default:
@@ -77,6 +85,8 @@ function getStepHref(step: LearningPlanStep): string | null {
 
 function getStepCtaLabel(step: LearningPlanStep): string {
   switch (step.stepType) {
+    case "DailyForge":
+      return "Start Daily Forge";
     case "Review":
       return "Start Review";
     case "FocusProblem":
@@ -87,6 +97,8 @@ function getStepCtaLabel(step: LearningPlanStep): string {
       return "Start Contrast Drill";
     case "BossBattle":
       return "Open Battles";
+    case "MockInterview":
+      return "Open Interview Mode";
     case "Reflection":
       return "Review Patterns";
     default:

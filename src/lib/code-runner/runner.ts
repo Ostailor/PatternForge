@@ -1,4 +1,4 @@
-import { runPythonCode } from "@/lib/code-runner/pythonRunner";
+import { executeValidatedCodeRun } from "@/lib/code-runner/executor";
 import {
   getRunnerConfig,
   runStructuredTests,
@@ -37,7 +37,7 @@ export async function runCode(input: CodeRunRequest): Promise<CodeRunResult> {
         );
       }
 
-      return runPythonCode(validation.request);
+      return executeValidatedCodeRun(validation.request);
     }
     default:
       return createCodeRunResult({

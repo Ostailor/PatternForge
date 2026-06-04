@@ -14,6 +14,7 @@ type DebugCoachPanelProps = {
   codeRunId: string | null;
   runStatus: CodeRunStatus | null;
   initialInsight: DebugInsightView | null;
+  enabled?: boolean;
   onInsightCreated?: (insight: DebugInsightView) => void;
 };
 
@@ -25,6 +26,7 @@ export default function DebugCoachPanel({
   codeRunId,
   runStatus,
   initialInsight,
+  enabled = true,
   onInsightCreated,
 }: DebugCoachPanelProps) {
   const [insight, setInsight] = useState<DebugInsightView | null>(
@@ -70,6 +72,26 @@ export default function DebugCoachPanel({
     setMessage("");
     const result = await createMistakeFromDebugInsightAction(insight.id);
     setMessage(result.message);
+  }
+
+  if (!enabled) {
+    return (
+      <section
+        id="debug-coach"
+        className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+          Debug Coach
+        </p>
+        <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">
+          Debug Coach is unavailable
+        </h2>
+        <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 text-slate-600">
+          AI-powered run feedback is turned off for this beta environment. You
+          can still inspect run output when code execution is enabled.
+        </p>
+      </section>
+    );
   }
 
   return (

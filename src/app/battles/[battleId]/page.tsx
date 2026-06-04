@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { abandonBattleAction } from "@/app/battles/[battleId]/actions";
 import BattleRoundClient from "@/app/battles/[battleId]/battle-round-client";
+import FeatureUnavailable from "@/components/FeatureUnavailable";
 import type {
   DebugInsightView,
   WorkspaceSubmissionHistoryItem,
@@ -12,7 +13,12 @@ import type {
 import ProgressBar from "@/components/ProgressBar";
 import { patterns } from "@/data/patterns";
 import { TestCaseSource } from "@/generated/prisma/client";
+import {
+  getCodeExecutionUnavailableMessage,
+  isCodeExecutionAvailable,
+} from "@/lib/code-runner/executor";
 import { getRunnerConfig } from "@/lib/code-runner/runnerConfig";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import type { Problem } from "@/lib/types";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
@@ -296,6 +302,18 @@ export default async function BattleRunnerPage({
     return <UnauthenticatedBattlePage />;
   }
 
+  if (!getFeatureFlag("bossBattles")) {
+    return (
+      <FeatureUnavailable
+        eyebrow="Boss Battles"
+        title="Boss Battles are unavailable"
+        description="This battle route is turned off for this beta environment. Navigation remains available, but battle sessions cannot be played right now."
+        href="/battles"
+        actionLabel="Back to Battles"
+      />
+    );
+  }
+
   const battle = await getBattleForRunner(battleId, userProfile.id);
 
   if (!battle) {
@@ -324,6 +342,13 @@ export default async function BattleRunnerPage({
   const currentRoundNumber = currentRound.roundNumber;
   const isFinalRound = completedRoundCount + 1 >= battle.totalRounds;
   const problem = toPracticeProblem(currentRound);
+  const codeRunnerEnabled =
+    getFeatureFlag("codeRunner") && isCodeExecutionAvailable();
+  const codeRunnerUnavailableMessage =
+    getFeatureFlag("codeRunner")
+      ? getCodeExecutionUnavailableMessage()
+      : "Code execution is temporarily unavailable.";
+  const aiCoachEnabled = getFeatureFlag("aiCoach");
   const workspaceData = await getBattleWorkspaceData({
     userProfileId: userProfile.id,
     problemId: currentRound.problemId,
@@ -381,6 +406,9 @@ export default async function BattleRunnerPage({
           patterns={patterns}
           isFinalRound={isFinalRound}
           workspaceData={workspaceData}
+          codeRunnerEnabled={codeRunnerEnabled}
+          codeRunnerUnavailableMessage={codeRunnerUnavailableMessage ?? undefined}
+          aiCoachEnabled={aiCoachEnabled}
         />
       </section>
     </main>

@@ -4,12 +4,15 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { patterns } from "@/data/patterns";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
 import {
   generateFocusedPatternInterview,
   generateMixedInterview,
   generateSingleProblemInterview,
   generateWeaknessRepairInterview,
 } from "@/lib/interviews/generateInterview";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 
@@ -63,6 +66,10 @@ async function ensureCanStartInterview(userProfileId: string): Promise<boolean> 
 }
 
 export async function startSingleProblemInterviewAction() {
+  if (!getFeatureFlag("interviews")) {
+    redirectToInterviews({ error: "disabled" });
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
@@ -78,6 +85,16 @@ export async function startSingleProblemInterviewAction() {
   try {
     const interview = await generateSingleProblemInterview(userProfile.id);
 
+    await trackEvent({
+      eventName: AnalyticsEvents.InterviewStarted,
+      userProfileId: userProfile.id,
+      properties: {
+        interviewId: interview.id,
+        interviewType: interview.interviewType,
+        durationMinutes: interview.durationMinutes,
+        roundCount: interview.rounds.length,
+      },
+    });
     interviewId = interview.id;
   } catch {
     redirectToInterviews({ error: "unavailable" });
@@ -88,6 +105,10 @@ export async function startSingleProblemInterviewAction() {
 }
 
 export async function startFocusedInterviewAction(formData: FormData) {
+  if (!getFeatureFlag("interviews")) {
+    redirectToInterviews({ error: "disabled" });
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
@@ -106,6 +127,17 @@ export async function startFocusedInterviewAction(formData: FormData) {
       getValidPatternId(readPatternId(formData)),
     );
 
+    await trackEvent({
+      eventName: AnalyticsEvents.InterviewStarted,
+      userProfileId: userProfile.id,
+      properties: {
+        interviewId: interview.id,
+        interviewType: interview.interviewType,
+        targetPatternId: interview.targetPatternId ?? undefined,
+        durationMinutes: interview.durationMinutes,
+        roundCount: interview.rounds.length,
+      },
+    });
     interviewId = interview.id;
   } catch {
     redirectToInterviews({ error: "unavailable" });
@@ -116,6 +148,10 @@ export async function startFocusedInterviewAction(formData: FormData) {
 }
 
 export async function startMixedInterviewAction() {
+  if (!getFeatureFlag("interviews")) {
+    redirectToInterviews({ error: "disabled" });
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
@@ -131,6 +167,16 @@ export async function startMixedInterviewAction() {
   try {
     const interview = await generateMixedInterview(userProfile.id);
 
+    await trackEvent({
+      eventName: AnalyticsEvents.InterviewStarted,
+      userProfileId: userProfile.id,
+      properties: {
+        interviewId: interview.id,
+        interviewType: interview.interviewType,
+        durationMinutes: interview.durationMinutes,
+        roundCount: interview.rounds.length,
+      },
+    });
     interviewId = interview.id;
   } catch {
     redirectToInterviews({ error: "unavailable" });
@@ -141,6 +187,10 @@ export async function startMixedInterviewAction() {
 }
 
 export async function startWeaknessRepairInterviewAction() {
+  if (!getFeatureFlag("interviews")) {
+    redirectToInterviews({ error: "disabled" });
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
@@ -156,6 +206,17 @@ export async function startWeaknessRepairInterviewAction() {
   try {
     const interview = await generateWeaknessRepairInterview(userProfile.id);
 
+    await trackEvent({
+      eventName: AnalyticsEvents.InterviewStarted,
+      userProfileId: userProfile.id,
+      properties: {
+        interviewId: interview.id,
+        interviewType: interview.interviewType,
+        targetPatternId: interview.targetPatternId ?? undefined,
+        durationMinutes: interview.durationMinutes,
+        roundCount: interview.rounds.length,
+      },
+    });
     interviewId = interview.id;
   } catch {
     redirectToInterviews({ error: "unavailable" });

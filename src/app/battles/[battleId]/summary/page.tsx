@@ -10,6 +10,7 @@ import {
   QuestCompletedCard,
   XPToast,
 } from "@/components/completion";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import { toAppAttempt } from "@/lib/progress-db";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
@@ -397,6 +398,7 @@ export default async function BattleSummaryPage({
     redirect(`/battles/${battle.id}`);
   }
 
+  const aiCoachEnabled = getFeatureFlag("aiCoach");
   const completedRounds = battle.rounds.filter((round) => round.attempt);
   const attemptIds = completedRounds
     .map((round) => round.attempt?.id)
@@ -559,7 +561,10 @@ export default async function BattleSummaryPage({
 
       {finalAttempt ? (
         <div className="mt-6">
-          <AIReviewPanel attempt={toAppAttempt(finalAttempt)} />
+          <AIReviewPanel
+            attempt={toAppAttempt(finalAttempt)}
+            enabled={aiCoachEnabled}
+          />
         </div>
       ) : null}
     </main>

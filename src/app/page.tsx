@@ -27,6 +27,7 @@ import type {
   DashboardAchievementPreview,
   DashboardBattleCardData,
   DashboardGamificationData,
+  DashboardStartingPath,
 } from "@/lib/progress-db";
 import type { DailyQuest } from "@/lib/quests/types";
 import type { DashboardRecommendation } from "@/lib/recommendations/dashboard";
@@ -147,6 +148,8 @@ export default function Home() {
     dailyQuests,
     dashboardGamification,
     nextBestAction,
+    onboardingState,
+    startingPath,
     isLoading,
     isSignedIn,
   } = useAuthProgress();
@@ -244,6 +247,10 @@ export default function Home() {
         onHide={() => setHiddenRecommendationId(nextBestAction?.id ?? null)}
       />
 
+      <OnboardingDashboardCta status={onboardingState?.status ?? null} />
+
+      <StartingPathCard startingPath={startingPath} />
+
       <ReviewDashboardSection reviewStats={reviewStats} />
 
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -297,6 +304,156 @@ export default function Home() {
         <PatternsInProgressPanel rows={patternsInProgress} />
       </section>
     </div>
+  );
+}
+
+function OnboardingDashboardCta({ status }: { status: string | null }) {
+  if (status === "Completed") {
+    return null;
+  }
+
+  const wasSkipped = status === "Skipped";
+
+  return (
+    <section className="mt-6 rounded-lg border border-teal-200 bg-teal-50 p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+            {wasSkipped ? "Setup skipped" : "Finish setup"}
+          </p>
+          <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+            Tune PatternForge around your interview goal
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
+            Set your goal, experience level, practice length, language, and
+            diagnostic choice so your first recommendation has better context.
+          </p>
+        </div>
+        <Link
+          href="/onboarding"
+          className="rounded-lg bg-slate-950 px-5 py-3 text-center text-sm font-black text-white transition hover:bg-teal-700"
+        >
+          {wasSkipped ? "Resume Setup" : "Start Setup"}
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function getStartingPathStepHref(
+  step: NonNullable<DashboardStartingPath["todayStep"]>,
+): string {
+  switch (step.stepType) {
+    case "DailyForge":
+      return `/forge${step.targetPatternId ? `?pattern=${step.targetPatternId}` : ""}`;
+    case "Review":
+      return "/review";
+    case "FocusProblem":
+    case "MixedProblem":
+      return step.problemId
+        ? `/problems/${step.problemId}`
+        : `/forge${step.targetPatternId ? `?pattern=${step.targetPatternId}` : ""}`;
+    case "ContrastDrill":
+      return step.targetPatternId ? `/forge?pattern=${step.targetPatternId}` : "/forge";
+    case "BossBattle":
+      return step.targetPatternId
+        ? `/battles?pattern=${step.targetPatternId}`
+        : "/battles";
+    case "MockInterview":
+      return step.targetPatternId
+        ? `/interviews?pattern=${step.targetPatternId}`
+        : "/interviews";
+    default:
+      return "/plans";
+  }
+}
+
+function formatStartingPathStepType(stepType: string): string {
+  switch (stepType) {
+    case "DailyForge":
+      return "Daily Forge";
+    case "FocusProblem":
+      return "Focus Problem";
+    case "MixedProblem":
+      return "Mixed Practice";
+    case "ContrastDrill":
+      return "Contrast Drill";
+    case "BossBattle":
+      return "Boss Battle";
+    case "MockInterview":
+      return "Interview Mode";
+    default:
+      return stepType;
+  }
+}
+
+function StartingPathCard({
+  startingPath,
+}: {
+  startingPath: DashboardStartingPath | null;
+}) {
+  if (!startingPath) {
+    return null;
+  }
+
+  const todayStep = startingPath.todayStep;
+  const stepHref = todayStep ? getStartingPathStepHref(todayStep) : "/plans";
+
+  return (
+    <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="grid gap-5 lg:grid-cols-[1fr_0.42fr]">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+            Your starting path
+          </p>
+          <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+            {todayStep?.title ?? startingPath.title}
+          </h2>
+          {todayStep ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-black uppercase tracking-[0.14em] text-slate-600">
+                Today&apos;s step
+              </span>
+              <span className="rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+                {formatStartingPathStepType(todayStep.stepType)}
+              </span>
+              {todayStep.targetPatternName ? (
+                <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-black uppercase tracking-[0.14em] text-indigo-700">
+                  {todayStep.targetPatternName}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          <p className="mt-4 max-w-4xl text-sm font-semibold leading-6 text-slate-600">
+            {startingPath.whyChosen}
+          </p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+            Next action
+          </p>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+            {todayStep?.problemTitle
+              ? `Practice: ${todayStep.problemTitle}`
+              : "Open the plan to see all 7 days."}
+          </p>
+          <div className="mt-4 grid gap-2">
+            <Link
+              href={stepHref}
+              className="rounded-lg bg-slate-950 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-teal-700"
+            >
+              Start Today&apos;s Step
+            </Link>
+            <Link
+              href={`/plans/${startingPath.planId}`}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-center text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              View Learning Plan
+            </Link>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 

@@ -5,6 +5,7 @@ import {
   AIResponseError,
   AIResponseParseError,
 } from "@/lib/ai/errors";
+import { safeParseAIJson, validateAIInputSize } from "@/lib/ai/safety";
 import type { AIPromptMessage } from "@/lib/ai/types";
 
 export { AIConfigurationError, AIResponseError, AIResponseParseError };
@@ -71,25 +72,23 @@ function getProviderConfig(): AIProviderConfig {
   };
 }
 
-function parseJsonContent(content: string): unknown {
-  const trimmed = content.trim();
-  const fencedJson = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  const jsonText = fencedJson?.[1] ?? trimmed;
-
-  try {
-    return JSON.parse(jsonText);
-  } catch {
-    throw new AIResponseParseError(
-      "AI provider returned a response that was not valid JSON.",
-    );
-  }
-}
-
 export async function requestStructuredJson({
   messages,
   temperature = 0.2,
   maxTokens = 1200,
 }: StructuredJsonRequest): Promise<unknown> {
+  const inputSize = validateAIInputSize(messages, {
+    label: "AI prompt",
+    maxCharacters: Number.parseInt(
+      process.env.PATTERNFORGE_AI_MAX_PROMPT_CHARS ?? "",
+      10,
+    ) || undefined,
+  });
+
+  if (!inputSize.ok) {
+    throw new AIResponseError(inputSize.message);
+  }
+
   const config = getProviderConfig();
   const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: "POST",
@@ -108,12 +107,9 @@ export async function requestStructuredJson({
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-
     throw new AIResponseError(
       `AI provider request failed with status ${response.status}.`,
       response.status,
-      body.slice(0, 1000),
     );
   }
 
@@ -133,5 +129,5 @@ export async function requestStructuredJson({
     throw new AIResponseError("AI provider response did not include content.");
   }
 
-  return parseJsonContent(content);
+  return safeParseAIJson(content);
 }

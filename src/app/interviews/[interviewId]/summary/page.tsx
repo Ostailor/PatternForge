@@ -342,27 +342,84 @@ async function getInterviewForSummary(
       id: interviewId,
       userProfileId,
     },
-    include: {
-      targetPattern: true,
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      targetPatternId: true,
+      interviewType: true,
+      result: true,
+      overallScore: true,
+      startedAt: true,
+      completedAt: true,
+      targetPattern: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
       rounds: {
-        include: {
-          problem: true,
-          selectedPattern: true,
-          correctPattern: true,
+        select: {
+          id: true,
+          roundNumber: true,
+          status: true,
+          selectedPatternId: true,
+          correctPatternId: true,
+          patternExplanation: true,
+          approachText: true,
+          testCasesText: true,
+          complexityText: true,
+          problem: {
+            select: {
+              title: true,
+              difficulty: true,
+              estimatedMinutes: true,
+            },
+          },
+          selectedPattern: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          correctPattern: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
           attempt: {
-            include: {
+            select: {
               mistakes: {
-                include: {
-                  pattern: true,
-                  problem: true,
+                select: {
+                  id: true,
+                  mistakeType: true,
+                  description: true,
+                  pattern: {
+                    select: {
+                      name: true,
+                    },
+                  },
+                  problem: {
+                    select: {
+                      title: true,
+                    },
+                  },
                 },
                 orderBy: {
                   createdAt: "desc",
                 },
               },
               flashcards: {
-                include: {
-                  pattern: true,
+                select: {
+                  id: true,
+                  front: true,
+                  back: true,
+                  pattern: {
+                    select: {
+                      name: true,
+                    },
+                  },
                 },
                 orderBy: {
                   createdAt: "desc",
@@ -370,15 +427,17 @@ async function getInterviewForSummary(
               },
             },
           },
-          aiReview: true,
-          feedbackRecords: {
-            orderBy: {
-              createdAt: "desc",
+          aiReview: {
+            select: {
+              feedbackSummary: true,
             },
           },
-          voiceTurns: {
+          feedbackRecords: {
+            select: {
+              summary: true,
+            },
             orderBy: {
-              createdAt: "asc",
+              createdAt: "desc",
             },
           },
         },
@@ -387,23 +446,62 @@ async function getInterviewForSummary(
         },
       },
       feedbackRecords: {
+        select: {
+          summary: true,
+          strengths: true,
+          weaknesses: true,
+          rubric: true,
+          followUpRecommendations: true,
+        },
         orderBy: {
           createdAt: "desc",
         },
       },
       rubricScores: {
+        select: {
+          category: true,
+          score: true,
+          notes: true,
+        },
         orderBy: {
           category: "asc",
         },
       },
       voiceTurns: {
+        select: {
+          id: true,
+          phase: true,
+          speaker: true,
+          transcript: true,
+          durationMs: true,
+        },
+        where: {
+          speaker: "User",
+        },
         orderBy: {
           createdAt: "asc",
         },
       },
       voiceFeedbackRecords: {
-        include: {
+        select: {
+          id: true,
+          clarityScore: true,
+          structureScore: true,
+          concisenessScore: true,
+          confidenceScore: true,
+          technicalExplanationScore: true,
+          summary: true,
+          strengths: true,
+          weaknesses: true,
+          suggestedPractice: true,
           communicationInsights: {
+            select: {
+              id: true,
+              insightType: true,
+              severity: true,
+              summary: true,
+              evidence: true,
+            },
             orderBy: {
               createdAt: "desc",
             },

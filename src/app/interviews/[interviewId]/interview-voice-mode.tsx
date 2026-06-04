@@ -21,6 +21,7 @@ type InterviewVoiceModeProps = {
   phase: InterviewPhase;
   targetFieldName: string;
   isOptional?: boolean;
+  enabled?: boolean;
 };
 
 function getInitialStatus(): VoiceControlStatus {
@@ -60,6 +61,7 @@ export default function InterviewVoiceMode({
   phase,
   targetFieldName,
   isOptional = false,
+  enabled = true,
 }: InterviewVoiceModeProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -279,6 +281,20 @@ export default function InterviewVoiceMode({
       stopStream(streamRef.current);
     };
   }, [clearRecordingTimer]);
+
+  if (!enabled) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+          Voice Mode
+        </p>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+          Voice Mode is turned off for this beta environment. Type your answer
+          manually to continue.
+        </p>
+      </div>
+    );
+  }
 
   if (isSkipped) {
     return (

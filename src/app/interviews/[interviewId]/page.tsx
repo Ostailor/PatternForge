@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { CodeWorkspace } from "@/components/code-workspace";
+import FeatureUnavailable from "@/components/FeatureUnavailable";
 import type {
   DebugInsightView,
   WorkspaceContext,
@@ -19,7 +20,12 @@ import type {
   InterviewType,
   RubricCategory,
 } from "@/generated/prisma/enums";
+import {
+  getCodeExecutionUnavailableMessage,
+  isCodeExecutionAvailable,
+} from "@/lib/code-runner/executor";
 import { getRunnerConfig } from "@/lib/code-runner/runnerConfig";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 
@@ -502,6 +508,18 @@ export default async function InterviewRunnerPage({
     return <UnauthenticatedInterviewPage />;
   }
 
+  if (!getFeatureFlag("interviews")) {
+    return (
+      <FeatureUnavailable
+        eyebrow="Interview Mode"
+        title="Interview Mode is unavailable"
+        description="This interview route is turned off for this beta environment. Navigation remains available, but interview sessions cannot be run right now."
+        href="/interviews"
+        actionLabel="Back to Interviews"
+      />
+    );
+  }
+
   const interview = await getInterviewForRunner(interviewId, userProfile.id);
 
   if (!interview) {
@@ -520,6 +538,14 @@ export default async function InterviewRunnerPage({
   const currentPhase = getCurrentPhase(interview, currentRound);
   const roundProgress = getRoundProgress(interview);
   const error = getSingleSearchParam(resolvedSearchParams, "error");
+  const codeRunnerEnabled =
+    getFeatureFlag("codeRunner") && isCodeExecutionAvailable();
+  const codeRunnerUnavailableMessage =
+    getFeatureFlag("codeRunner")
+      ? getCodeExecutionUnavailableMessage()
+      : "Code execution is temporarily unavailable.";
+  const aiCoachEnabled = getFeatureFlag("aiCoach");
+  const voiceModeEnabled = getFeatureFlag("voiceMode");
   const workspaceData =
     currentRound && shouldShowWorkspace(currentPhase)
       ? await getInterviewWorkspaceData({
@@ -578,9 +604,11 @@ export default async function InterviewRunnerPage({
         </div>
       </section>
 
-      {error === "save" ? (
+      {error === "save" || error === "rate" ? (
         <p className="mt-5 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">
-          Could not save that phase. Check the required fields and try again.
+          {error === "rate"
+            ? "Daily AI interview limit reached. Try again later."
+            : "Could not save that phase. Check the required fields and try again."}
         </p>
       ) : null}
 
@@ -603,6 +631,7 @@ export default async function InterviewRunnerPage({
               interview={interview}
               currentRound={currentRound}
               currentPhase={currentPhase}
+              voiceModeEnabled={voiceModeEnabled}
             />
           </div>
           {currentRound && workspaceData ? (
@@ -611,6 +640,9 @@ export default async function InterviewRunnerPage({
               round={currentRound}
               currentPhase={currentPhase}
               workspaceData={workspaceData}
+              codeRunnerEnabled={codeRunnerEnabled}
+              codeRunnerUnavailableMessage={codeRunnerUnavailableMessage ?? undefined}
+              aiCoachEnabled={aiCoachEnabled}
             />
           ) : null}
         </div>
@@ -864,10 +896,12 @@ function PhaseInputPanel({
   interview,
   currentRound,
   currentPhase,
+  voiceModeEnabled,
 }: {
   interview: InterviewForRunner;
   currentRound: InterviewRoundForRunner | null;
   currentPhase: InterviewPhase;
+  voiceModeEnabled: boolean;
 }) {
   if (!currentRound || currentPhase === "Feedback") {
     return <FeedbackPanel interview={interview} />;
@@ -898,6 +932,7 @@ function PhaseInputPanel({
             phase={currentPhase}
             targetFieldName={voiceTargetFieldName}
             isOptional={currentPhase === "Implementation"}
+            enabled={voiceModeEnabled}
           />
         ) : null}
         {currentPhase === "Implementation" ? (
@@ -939,11 +974,17 @@ function InterviewCodeWorkspacePanel({
   round,
   currentPhase,
   workspaceData,
+  codeRunnerEnabled,
+  codeRunnerUnavailableMessage,
+  aiCoachEnabled,
 }: {
   interviewId: string;
   round: InterviewRoundForRunner;
   currentPhase: InterviewPhase;
   workspaceData: InterviewWorkspaceData;
+  codeRunnerEnabled: boolean;
+  codeRunnerUnavailableMessage?: string;
+  aiCoachEnabled: boolean;
 }) {
   const context: WorkspaceContext = {
     mode: "Interview",
@@ -972,6 +1013,9 @@ function InterviewCodeWorkspacePanel({
         problem={round.problem}
         context={context}
         runnerConfigured={workspaceData.runnerConfigured}
+        codeRunnerEnabled={codeRunnerEnabled}
+        codeRunnerUnavailableMessage={codeRunnerUnavailableMessage}
+        aiCoachEnabled={aiCoachEnabled}
         initialHistory={workspaceData.initialHistory}
         initialTestCases={workspaceData.initialTestCases}
         initialDebugInsight={workspaceData.initialDebugInsight}

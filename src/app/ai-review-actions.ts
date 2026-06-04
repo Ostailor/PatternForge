@@ -6,12 +6,17 @@ import {
   createCurrentUserAIReview,
 } from "@/lib/ai-review-db";
 import { DAILY_AI_REVIEW_LIMIT } from "@/lib/ai-review-limits";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
 import {
   AIConfigurationError,
   AIResponseError,
   AIResponseParseError,
 } from "@/lib/ai/errors";
 import type { SavedAIReview } from "@/lib/ai/types";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
+import { checkRateLimit } from "@/lib/rate-limit/rateLimit";
+import { ensureCurrentUserProfile } from "@/lib/user-profile";
 
 const MAX_USER_CODE_LENGTH = 20000;
 const MAX_USER_EXPLANATION_LENGTH = 8000;
@@ -49,11 +54,43 @@ function validateAIReviewInput(input: RequestAIReviewInput): string | null {
 export async function requestAIReviewAction(
   input: RequestAIReviewInput,
 ): Promise<RequestAIReviewResult> {
+  if (!getFeatureFlag("aiCoach")) {
+    return {
+      status: "invalid",
+      message: "AI Coach is temporarily unavailable.",
+    };
+  }
+
   const validationError = validateAIReviewInput(input);
 
   if (validationError) {
     return { status: "invalid", message: validationError };
   }
+
+  const userProfile = await ensureCurrentUserProfile();
+
+  if (!userProfile) {
+    return { status: "unauthenticated" };
+  }
+
+  const rateLimit = await checkRateLimit({
+    kind: "aiReview",
+    userProfileId: userProfile.id,
+  });
+
+  if (!rateLimit.ok) {
+    return { status: "rate_limited", message: rateLimit.message };
+  }
+
+  await trackEvent({
+    eventName: AnalyticsEvents.AIReviewRequested,
+    userProfileId: userProfile.id,
+    properties: {
+      attemptId: input.attemptId,
+      codeLength: input.userCode.length,
+      explanationLength: input.userExplanation.length,
+    },
+  });
 
   try {
     const review = await createCurrentUserAIReview({
@@ -65,6 +102,23 @@ export async function requestAIReviewAction(
     if (!review) {
       return { status: "unauthenticated" };
     }
+
+    await trackEvent({
+      eventName: AnalyticsEvents.AIReviewCompleted,
+      userProfileId: userProfile.id,
+      properties: {
+        attemptId: review.attemptId,
+        reviewId: review.id,
+        problemId: review.problemId,
+        patternId: review.patternId,
+        patternScore: review.patternScore,
+        implementationScore: review.implementationScore,
+        complexityScore: review.complexityScore,
+        explanationScore: review.explanationScore,
+        suggestedMistakeCount: review.suggestedMistakes.length,
+        suggestedFlashcardCount: review.suggestedFlashcards.length,
+      },
+    });
 
     return { status: "saved", review };
   } catch (error) {

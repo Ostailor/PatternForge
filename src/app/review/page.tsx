@@ -1,6 +1,8 @@
 import { SignInButton } from "@clerk/nextjs";
 
 import DailyReviewClient from "@/app/review/review-client";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
 import {
   getRecentReviewHistory,
   getReviewQueue,
@@ -20,6 +22,17 @@ export default async function ReviewPage() {
     getReviewStats(userProfile.id),
     getRecentReviewHistory(userProfile.id),
   ]);
+
+  await trackEvent({
+    eventName: AnalyticsEvents.DailyReviewStarted,
+    userProfileId: userProfile.id,
+    properties: {
+      queueCount: queue.length,
+      dueFlashcardsCount: stats.dueFlashcardsCount,
+      dueMistakesCount: stats.dueMistakesCount,
+      reviewedTodayCount: stats.reviewedTodayCount,
+    },
+  });
 
   return (
     <DailyReviewClient

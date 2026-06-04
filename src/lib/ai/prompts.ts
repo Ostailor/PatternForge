@@ -3,6 +3,7 @@ import type {
   AIPromptMessage,
   AIReviewInput,
 } from "@/lib/ai/types";
+import { buildAIPromptContext } from "@/lib/ai/safety";
 
 const coachSystemPrompt = [
   "You are the PatternForge AI Coach.",
@@ -20,10 +21,6 @@ const coachSystemPrompt = [
 // full LeetCode statements. Prompts must use only user-provided content and
 // PatternForge metadata. The AI must not claim tests passed unless tests
 // actually ran and that result is included in the input.
-function serializeInput(input: AIReviewInput | AIHintInput): string {
-  return JSON.stringify(input, null, 2);
-}
-
 export function buildReviewSolutionMessages(
   input: AIReviewInput,
 ): AIPromptMessage[] {
@@ -66,9 +63,9 @@ export function buildReviewSolutionMessages(
     { "front": string, "back": string }
   ],
   "suggestedNextStep": string
-}`,
+        }`,
         "PatternForge attempt input:",
-        serializeInput(input),
+        buildAIPromptContext(input, { label: "AI review context" }),
       ].join("\n\n"),
     },
   ];
@@ -101,9 +98,9 @@ export function buildGenerateHintsMessages(
     { "level": 4, "title": "Edge case or common pitfall", "hint": string },
     { "level": 5, "title": "High-level pseudocode", "hint": string }
   ]
-}`,
+        }`,
         "PatternForge problem metadata:",
-        serializeInput(input),
+        buildAIPromptContext(input, { label: "AI hint context" }),
       ].join("\n\n"),
     },
   ];

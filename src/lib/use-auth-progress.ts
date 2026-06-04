@@ -5,7 +5,11 @@ import { useCallback, useEffect, useState } from "react";
 
 import { createEmptyProgress } from "@/lib/progress";
 import type { GamificationStats } from "@/lib/gamification";
-import type { DashboardGamificationData } from "@/lib/progress-db";
+import type {
+  DashboardGamificationData,
+  DashboardOnboardingState,
+  DashboardStartingPath,
+} from "@/lib/progress-db";
 import type { DailyQuest } from "@/lib/quests/types";
 import type { DashboardRecommendation } from "@/lib/recommendations/dashboard";
 import type { ReviewStats } from "@/lib/review/queue";
@@ -19,6 +23,8 @@ type ProgressResponse = {
   dailyQuests: DailyQuest[] | null;
   dashboardGamification: DashboardGamificationData | null;
   nextBestAction: DashboardRecommendation | null;
+  onboardingState: DashboardOnboardingState | null;
+  startingPath: DashboardStartingPath | null;
 };
 
 export const ACCOUNT_PROGRESS_CHANGED_EVENT =
@@ -52,6 +58,11 @@ export function useAuthProgress() {
     useState<DashboardGamificationData | null>(null);
   const [nextBestAction, setNextBestAction] =
     useState<DashboardRecommendation | null>(null);
+  const [onboardingState, setOnboardingState] =
+    useState<DashboardOnboardingState | null>(null);
+  const [startingPath, setStartingPath] = useState<DashboardStartingPath | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshProgress = useCallback(async () => {
@@ -67,6 +78,8 @@ export function useAuthProgress() {
       setDailyQuests(null);
       setDashboardGamification(null);
       setNextBestAction(null);
+      setOnboardingState(null);
+      setStartingPath(null);
       setIsLoading(false);
       return;
     }
@@ -86,6 +99,8 @@ export function useAuthProgress() {
         setDailyQuests(null);
         setDashboardGamification(null);
         setNextBestAction(null);
+        setOnboardingState(null);
+        setStartingPath(null);
         setIsLoading(false);
         return;
       }
@@ -98,6 +113,8 @@ export function useAuthProgress() {
       setDailyQuests(payload.dailyQuests);
       setDashboardGamification(payload.dashboardGamification);
       setNextBestAction(payload.nextBestAction);
+      setOnboardingState(payload.onboardingState);
+      setStartingPath(payload.startingPath);
       setIsLoading(false);
     } catch {
       setProgress(createEmptyProgress());
@@ -107,6 +124,8 @@ export function useAuthProgress() {
       setDailyQuests(null);
       setDashboardGamification(null);
       setNextBestAction(null);
+      setOnboardingState(null);
+      setStartingPath(null);
       setIsLoading(false);
     }
   }, [authLoadTimedOut, isLoaded, isSignedIn]);
@@ -149,6 +168,8 @@ export function useAuthProgress() {
     dailyQuests,
     dashboardGamification,
     nextBestAction,
+    onboardingState,
+    startingPath,
     isLoading: !authLoadTimedOut && (!isLoaded || isLoading),
     isSignedIn: Boolean(isSignedIn),
     refreshProgress,

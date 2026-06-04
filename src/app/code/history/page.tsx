@@ -1,5 +1,6 @@
 import { SignInButton } from "@clerk/nextjs";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import type { Prisma } from "@/generated/prisma/client";
 import type {
@@ -22,6 +23,7 @@ type CodeHistoryFilters = {
   contextType: ContextType;
   from: string;
   to: string;
+  page: number;
 };
 
 type CodeHistoryData = Awaited<ReturnType<typeof getCodeHistoryData>>;
@@ -44,6 +46,7 @@ const contextTypes: ContextType[] = [
   "Battle",
   "Unlinked",
 ];
+const PAGE_SIZE = 25;
 
 function getSingleSearchParam(
   searchParams: Record<string, string | string[] | undefined>,
@@ -88,6 +91,7 @@ function parseFilters(
   const contextType = getSingleSearchParam(searchParams, "contextType");
   const from = getSingleSearchParam(searchParams, "from");
   const to = getSingleSearchParam(searchParams, "to");
+  const page = Number.parseInt(getSingleSearchParam(searchParams, "page"), 10);
 
   return {
     problemId,
@@ -102,6 +106,7 @@ function parseFilters(
       : "all",
     from: parseDateInput(from) ? from : "",
     to: parseDateInput(to) ? to : "",
+    page: Number.isFinite(page) && page > 0 ? page : 1,
   };
 }
 
@@ -271,9 +276,11 @@ async function getProblemOptions(userProfileId: string) {
         },
       },
     },
+    distinct: ["problemId"],
     orderBy: {
       updatedAt: "desc",
     },
+    take: 250,
   });
   const byId = new Map<string, { id: string; title: string }>();
 
@@ -296,9 +303,19 @@ async function getCodeHistoryData(
     ...(filters.problemId ? { problemId: filters.problemId } : {}),
     ...(filters.language !== "all" ? { language: filters.language } : {}),
     ...(createdAt ? { createdAt } : {}),
+    ...(filters.runStatus !== "all"
+      ? {
+          codeRuns: {
+            some: {
+              status: filters.runStatus,
+            },
+          },
+        }
+      : {}),
     ...buildContextWhere(filters.contextType),
   };
-  const [submissions, problemOptions] = await Promise.all([
+  const skip = (filters.page - 1) * PAGE_SIZE;
+  const [submissions, totalCount, problemOptions] = await Promise.all([
     getPrisma().codeSubmission.findMany({
       where,
       include: {
@@ -357,20 +374,46 @@ async function getCodeHistoryData(
       orderBy: {
         updatedAt: "desc",
       },
-      take: 100,
+      skip,
+      take: PAGE_SIZE,
     }),
+    getPrisma().codeSubmission.count({ where }),
     getProblemOptions(userProfileId),
   ]);
 
   return {
-    submissions:
-      filters.runStatus === "all"
-        ? submissions
-        : submissions.filter(
-            (submission) => submission.codeRuns[0]?.status === filters.runStatus,
-          ),
+    submissions,
     problemOptions,
+    totalCount,
+    pageCount: Math.max(1, Math.ceil(totalCount / PAGE_SIZE)),
   };
+}
+
+function buildPageHref(filters: CodeHistoryFilters, page: number): string {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries({
+    problemId: filters.problemId,
+    language: filters.language,
+    runStatus: filters.runStatus,
+    contextType: filters.contextType,
+    from: filters.from,
+    to: filters.to,
+  })) {
+    if (!value || value === "all") {
+      continue;
+    }
+
+    params.set(key, value);
+  }
+
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+
+  const queryString = params.toString();
+
+  return queryString ? `/code/history?${queryString}` : "/code/history";
 }
 
 export default async function CodeHistoryPage({
@@ -386,7 +429,7 @@ export default async function CodeHistoryPage({
   }
 
   const filters = parseFilters(resolvedSearchParams);
-  const { submissions, problemOptions } = await getCodeHistoryData(
+  const { submissions, problemOptions, totalCount, pageCount } = await getCodeHistoryData(
     userProfile.id,
     filters,
   );
@@ -422,7 +465,7 @@ export default async function CodeHistoryPage({
             </h2>
           </div>
           <span className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-slate-600 shadow-sm">
-            {submissions.length} shown
+            {totalCount} total
           </span>
         </div>
 
@@ -438,6 +481,12 @@ export default async function CodeHistoryPage({
             ))}
           </div>
         )}
+        <PaginationControls
+          page={filters.page}
+          pageCount={pageCount}
+          previousHref={buildPageHref(filters, Math.max(1, filters.page - 1))}
+          nextHref={buildPageHref(filters, Math.min(pageCount, filters.page + 1))}
+        />
       </section>
     </main>
   );
@@ -525,7 +574,7 @@ function SelectField({
   label: string;
   name: string;
   value: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <label className="block">
@@ -540,6 +589,48 @@ function SelectField({
         {children}
       </select>
     </label>
+  );
+}
+
+function PaginationControls({
+  page,
+  pageCount,
+  previousHref,
+  nextHref,
+}: {
+  page: number;
+  pageCount: number;
+  previousHref: string;
+  nextHref: string;
+}) {
+  if (pageCount <= 1) {
+    return null;
+  }
+
+  return (
+    <nav className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-sm font-bold text-slate-600">
+        Page {page} of {pageCount}
+      </p>
+      <div className="flex gap-2">
+        {page > 1 ? (
+          <Link
+            href={previousHref}
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-950 transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            Previous
+          </Link>
+        ) : null}
+        {page < pageCount ? (
+          <Link
+            href={nextHref}
+            className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-teal-700"
+          >
+            Next
+          </Link>
+        ) : null}
+      </div>
+    </nav>
   );
 }
 

@@ -18,6 +18,7 @@ const navItems = [
   { href: "/flashcards", label: "Cards" },
   { href: "/achievements", label: "Badges" },
   { href: "/mistakes", label: "Mistakes" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export default function Navbar() {

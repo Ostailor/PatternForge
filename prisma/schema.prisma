@@ -259,6 +259,71 @@ enum TestCaseSource {
   PatternForge
 }
 
+enum OnboardingStatus {
+  NotStarted
+  InProgress
+  Completed
+  Skipped
+}
+
+enum CurrentLevel {
+  Beginner
+  SomeExperience
+  InterviewPrep
+  Advanced
+}
+
+enum PrimaryGoal {
+  LearnPatterns
+  PrepareForInternships
+  PrepareForNewGrad
+  PrepareForBigTech
+  MaintainSkills
+  ImproveInterviewCommunication
+}
+
+enum PreferredSessionLength {
+  Short10
+  Medium25
+  Long45
+}
+
+enum DiagnosticStatus {
+  NotStarted
+  InProgress
+  Completed
+  Skipped
+}
+
+enum DiagnosticQuestionType {
+  PatternRecognition
+  ConfidenceCheck
+  GoalQuestion
+  ExperienceQuestion
+}
+
+enum UserGoalStatus {
+  Active
+  Completed
+  Paused
+  Abandoned
+}
+
+enum FeedbackType {
+  Bug
+  Confusing
+  FeatureRequest
+  Praise
+  Other
+}
+
+enum FeedbackStatus {
+  New
+  Reviewed
+  Planned
+  Closed
+}
+
 model UserProfile {
   id                     String                   @id @default(cuid())
   authUserId             String                   @unique
@@ -287,61 +352,214 @@ model UserProfile {
   voiceSessions          VoiceSession[]
   voiceFeedbackRecords   VoiceFeedback[]
   communicationInsights  CommunicationInsight[]
+  analyticsEvents        AnalyticsEvent[]
+  userFeedback           UserFeedback[]
+  userSettings           UserSettings?
+  onboardingState        OnboardingState?
+  diagnosticAssessments  DiagnosticAssessment[]
+  userGoals              UserGoal[]
+}
+
+model UserSettings {
+  id                       String                 @id @default(cuid())
+  userProfileId            String                 @unique
+  preferredLanguage        CodeLanguage           @default(Python)
+  timezone                 String                 @default("UTC")
+  dailyGoalMinutes         Int                    @default(25)
+  targetInterviewDate      DateTime?
+  currentLevel             CurrentLevel           @default(Beginner)
+  primaryGoal              PrimaryGoal            @default(LearnPatterns)
+  preferredSessionLength   PreferredSessionLength @default(Medium25)
+  voiceModeEnabled         Boolean                @default(false)
+  interviewerSpeechEnabled Boolean                @default(false)
+  storeVoiceTranscripts    Boolean                @default(true)
+  storeRawAudio            Boolean                @default(false)
+  analyticsOptOut          Boolean                @default(false)
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+  userProfile              UserProfile            @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+
+  @@index([preferredLanguage])
+  @@index([currentLevel])
+  @@index([primaryGoal])
+  @@index([createdAt])
+}
+
+model AnalyticsEvent {
+  id            String       @id @default(cuid())
+  userProfileId String?
+  eventName     String
+  properties    Json         @default("{}")
+  createdAt     DateTime     @default(now())
+  userProfile   UserProfile? @relation(fields: [userProfileId], references: [id], onDelete: SetNull)
+
+  @@index([userProfileId])
+  @@index([eventName])
+  @@index([createdAt])
+  @@index([userProfileId, createdAt])
+  @@index([eventName, createdAt])
+}
+
+model UserFeedback {
+  id            String         @id @default(cuid())
+  userProfileId String?
+  feedbackType  FeedbackType
+  pagePath      String
+  message       String         @db.Text
+  rating        Int?
+  metadata      Json?
+  status        FeedbackStatus @default(New)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  userProfile   UserProfile?   @relation(fields: [userProfileId], references: [id], onDelete: SetNull)
+
+  @@index([userProfileId])
+  @@index([feedbackType])
+  @@index([status])
+  @@index([createdAt])
+  @@index([userProfileId, createdAt])
+  @@index([status, createdAt])
+}
+
+model OnboardingState {
+  id            String           @id @default(cuid())
+  userProfileId String           @unique
+  status        OnboardingStatus @default(NotStarted)
+  currentStep   String           @default("welcome")
+  completedAt   DateTime?
+  skippedAt     DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  userProfile   UserProfile      @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([currentStep])
+  @@index([createdAt])
+}
+
+model DiagnosticAssessment {
+  id                        String               @id @default(cuid())
+  userProfileId             String
+  status                    DiagnosticStatus     @default(NotStarted)
+  startedAt                 DateTime             @default(now())
+  completedAt               DateTime?
+  overallLevel              CurrentLevel?
+  recommendedStartPatternId String?
+  recommendedPlanId         String?
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
+  userProfile               UserProfile          @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  recommendedStartPattern   Pattern?             @relation(fields: [recommendedStartPatternId], references: [id], onDelete: SetNull)
+  recommendedPlan           LearningPlan?        @relation(fields: [recommendedPlanId], references: [id], onDelete: SetNull)
+  questions                 DiagnosticQuestion[]
+
+  @@index([userProfileId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([completedAt])
+  @@index([recommendedStartPatternId])
+  @@index([recommendedPlanId])
+  @@index([createdAt])
+}
+
+model DiagnosticQuestion {
+  id             String                 @id @default(cuid())
+  assessmentId   String
+  questionType   DiagnosticQuestionType
+  prompt         String                 @db.Text
+  patternId      String?
+  problemId      String?
+  selectedAnswer String?                @db.Text
+  correctAnswer  String?                @db.Text
+  wasCorrect     Boolean?
+  confidence     Int?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  assessment     DiagnosticAssessment   @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  pattern        Pattern?               @relation(fields: [patternId], references: [id], onDelete: SetNull)
+  problem        Problem?               @relation(fields: [problemId], references: [id], onDelete: SetNull)
+
+  @@index([assessmentId])
+  @@index([questionType])
+  @@index([patternId])
+  @@index([problemId])
+  @@index([createdAt])
+}
+
+model UserGoal {
+  id            String         @id @default(cuid())
+  userProfileId String
+  goalType      String
+  title         String
+  targetDate    DateTime?
+  status        UserGoalStatus @default(Active)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  userProfile   UserProfile    @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+
+  @@index([userProfileId])
+  @@index([goalType])
+  @@index([status])
+  @@index([targetDate])
+  @@index([createdAt])
 }
 
 model Pattern {
-  id                       String             @id
+  id                       String                 @id
   name                     String
   category                 String
-  description              String             @db.Text
-  recognitionClues         String[]           @default([])
-  templateSummary          String             @db.Text
-  commonMistakes           String[]           @default([])
+  description              String                 @db.Text
+  recognitionClues         String[]               @default([])
+  templateSummary          String                 @db.Text
+  commonMistakes           String[]               @default([])
   levelOrder               Int
-  createdAt                DateTime           @default(now())
-  updatedAt                DateTime           @updatedAt
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
   problemPatterns          ProblemPattern[]
-  selectedAttempts         Attempt[]          @relation("SelectedPattern")
-  correctAttempts          Attempt[]          @relation("CorrectPattern")
+  selectedAttempts         Attempt[]              @relation("SelectedPattern")
+  correctAttempts          Attempt[]              @relation("CorrectPattern")
   aiReviews                AIReview[]
   mistakes                 Mistake[]
   flashcards               Flashcard[]
   targetBattles            Battle[]
   expectedRounds           BattleRound[]
-  targetRecommendations    Recommendation[]   @relation("RecommendationTargetPattern")
-  secondaryRecommendations Recommendation[]   @relation("RecommendationSecondaryPattern")
+  targetRecommendations    Recommendation[]       @relation("RecommendationTargetPattern")
+  secondaryRecommendations Recommendation[]       @relation("RecommendationSecondaryPattern")
   patternInsights          PatternInsight[]
-  selectedConfusions       PatternConfusion[] @relation("SelectedConfusionPattern")
-  correctConfusions        PatternConfusion[] @relation("CorrectConfusionPattern")
+  selectedConfusions       PatternConfusion[]     @relation("SelectedConfusionPattern")
+  correctConfusions        PatternConfusion[]     @relation("CorrectConfusionPattern")
   learningPlanSteps        LearningPlanStep[]
   targetInterviewSessions  InterviewSession[]
-  selectedInterviewRounds  InterviewRound[]   @relation("InterviewRoundSelectedPattern")
-  correctInterviewRounds   InterviewRound[]   @relation("InterviewRoundCorrectPattern")
+  selectedInterviewRounds  InterviewRound[]       @relation("InterviewRoundSelectedPattern")
+  correctInterviewRounds   InterviewRound[]       @relation("InterviewRoundCorrectPattern")
+  diagnosticAssessments    DiagnosticAssessment[]
+  diagnosticQuestions      DiagnosticQuestion[]
 
   @@index([levelOrder])
 }
 
 model Problem {
-  id                String                @id
-  title             String
-  url               String                @unique
-  difficulty        Difficulty
-  estimatedMinutes  Int
-  recognitionClues  String[]              @default([])
-  commonMistakes    String[]              @default([])
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  problemPatterns   ProblemPattern[]
-  attempts          Attempt[]
-  aiReviews         AIReview[]
-  mistakes          Mistake[]
-  battleRounds      BattleRound[]
-  recommendations   Recommendation[]
-  learningPlanSteps LearningPlanStep[]
-  interviewRounds   InterviewRound[]
-  runnerConfigs     ProblemRunnerConfig[]
-  codeSubmissions   CodeSubmission[]
-  testCases         TestCase[]
+  id                  String                @id
+  title               String
+  url                 String                @unique
+  difficulty          Difficulty
+  estimatedMinutes    Int
+  recognitionClues    String[]              @default([])
+  commonMistakes      String[]              @default([])
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  problemPatterns     ProblemPattern[]
+  attempts            Attempt[]
+  aiReviews           AIReview[]
+  mistakes            Mistake[]
+  battleRounds        BattleRound[]
+  recommendations     Recommendation[]
+  learningPlanSteps   LearningPlanStep[]
+  interviewRounds     InterviewRound[]
+  runnerConfigs       ProblemRunnerConfig[]
+  codeSubmissions     CodeSubmission[]
+  testCases           TestCase[]
+  diagnosticQuestions DiagnosticQuestion[]
 }
 
 model ProblemPattern {
@@ -466,6 +684,7 @@ model Mistake {
   @@index([patternId])
   @@index([reviewDueAt])
   @@index([createdAt])
+  @@index([userProfileId, status, reviewDueAt])
 }
 
 model Flashcard {
@@ -493,6 +712,7 @@ model Flashcard {
   @@index([patternId])
   @@index([reviewDueAt])
   @@index([createdAt])
+  @@index([userProfileId, status, reviewDueAt])
 }
 
 model ReviewLog {
@@ -513,6 +733,7 @@ model ReviewLog {
   @@index([reviewedAt])
   @@index([flashcardId])
   @@index([mistakeId])
+  @@index([userProfileId, reviewedAt])
 }
 
 model Battle {
@@ -628,6 +849,7 @@ model GameEvent {
   @@index([userProfileId])
   @@index([eventType])
   @@index([createdAt])
+  @@index([userProfileId, createdAt])
 }
 
 model Recommendation {
@@ -660,6 +882,7 @@ model Recommendation {
   @@index([secondaryPatternId])
   @@index([problemId])
   @@index([createdAt])
+  @@index([userProfileId, status, priority, createdAt])
 }
 
 model PatternInsight {
@@ -703,22 +926,24 @@ model PatternConfusion {
 }
 
 model LearningPlan {
-  id            String             @id @default(cuid())
-  userProfileId String
-  title         String
-  goal          String             @db.Text
-  status        LearningPlanStatus @default(Active)
-  startDate     DateTime
-  endDate       DateTime?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  userProfile   UserProfile        @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
-  steps         LearningPlanStep[]
+  id                               String                 @id @default(cuid())
+  userProfileId                    String
+  title                            String
+  goal                             String                 @db.Text
+  status                           LearningPlanStatus     @default(Active)
+  startDate                        DateTime
+  endDate                          DateTime?
+  createdAt                        DateTime               @default(now())
+  updatedAt                        DateTime               @updatedAt
+  userProfile                      UserProfile            @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+  steps                            LearningPlanStep[]
+  recommendedDiagnosticAssessments DiagnosticAssessment[]
 
   @@index([userProfileId])
   @@index([status])
   @@index([startDate])
   @@index([createdAt])
+  @@index([userProfileId, status, createdAt])
 }
 
 model LearningPlanStep {
@@ -802,6 +1027,8 @@ model InterviewSession {
   @@index([startedAt])
   @@index([completedAt])
   @@index([createdAt])
+  @@index([userProfileId, status, completedAt])
+  @@index([userProfileId, createdAt])
 }
 
 model InterviewRound {
@@ -875,6 +1102,10 @@ model CodeSubmission {
   @@index([status])
   @@index([language])
   @@index([createdAt])
+  @@index([userProfileId, updatedAt])
+  @@index([userProfileId, status, updatedAt])
+  @@index([userProfileId, problemId, updatedAt])
+  @@index([userProfileId, language, updatedAt])
 }
 
 model CodeRun {
@@ -899,6 +1130,8 @@ model CodeRun {
   @@index([codeSubmissionId])
   @@index([status])
   @@index([createdAt])
+  @@index([userProfileId, createdAt])
+  @@index([userProfileId, status, createdAt])
 }
 
 model TestCase {
@@ -1034,6 +1267,7 @@ model VoiceSession {
   @@index([interviewSessionId])
   @@index([status])
   @@index([createdAt])
+  @@index([userProfileId, status, createdAt])
 }
 
 model VoiceTurn {
@@ -1059,6 +1293,8 @@ model VoiceTurn {
   @@index([phase])
   @@index([speaker])
   @@index([createdAt])
+  @@index([voiceSessionId, speaker, createdAt])
+  @@index([interviewSessionId, speaker, createdAt])
 }
 
 model VoiceFeedback {

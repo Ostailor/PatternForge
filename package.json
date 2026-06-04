@@ -12,8 +12,14 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
+    "validate:data": "tsx scripts/validate-seed-data.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsc --noEmit --pretty false"
+    "test": "npm run typecheck && npm run test:unit",
+    "test:unit": "tsx --test $(find src -name '*.test.ts' ! -name '*.integration.test.ts' ! -path 'src/lib/code-runner/runner.test.ts' ! -path 'src/lib/code-runner/config.test.ts')",
+    "test:integration": "NODE_OPTIONS='--conditions=react-server' tsx --test $(find src -name '*.integration.test.ts')",
+    "test:integration:db": "NODE_OPTIONS='--conditions=react-server' PATTERNFORGE_RUN_DB_TESTS=1 tsx --test $(find src -name '*.integration.test.ts')",
+    "test:code-runner": "CODE_RUNNER_MODE=local-dev NODE_ENV=test tsx --test src/lib/code-runner/runner.test.ts src/lib/code-runner/config.test.ts",
+    "test:all": "npm run test:unit && npm run test:code-runner && npm run test:integration"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.4.2",

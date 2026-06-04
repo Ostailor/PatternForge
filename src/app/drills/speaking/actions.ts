@@ -13,6 +13,7 @@ import {
 import { checkAchievements } from "@/lib/achievements/service";
 import { createGameEvent } from "@/lib/game/events";
 import { getPrisma } from "@/lib/prisma";
+import { checkRateLimit } from "@/lib/rate-limit/rateLimit";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 import { createManualTranscriptionOutput, transcribeInterviewTurn } from "@/lib/voice/transcription";
 import { MAX_TRANSCRIPT_LENGTH } from "@/lib/voice/voiceLimits";
@@ -176,6 +177,18 @@ export async function transcribeSpeakingDrillAction(
     };
   }
 
+  const rateLimit = await checkRateLimit({
+    kind: "speechTranscription",
+    userProfileId: userProfile.id,
+  });
+
+  if (!rateLimit.ok) {
+    return {
+      status: "fallback",
+      message: rateLimit.message,
+    };
+  }
+
   const drillType = readString(formData, "drillType") as SpeakingDrillType;
   const audio = formData.get("audio");
 
@@ -224,6 +237,18 @@ export async function scoreSpeakingDrillAction(
     return {
       status: "invalid",
       message: `Transcript must be between 1 and ${MAX_TRANSCRIPT_LENGTH.toLocaleString()} characters.`,
+    };
+  }
+
+  const rateLimit = await checkRateLimit({
+    kind: "communicationScoring",
+    userProfileId: userProfile.id,
+  });
+
+  if (!rateLimit.ok) {
+    return {
+      status: "invalid",
+      message: rateLimit.message,
     };
   }
 

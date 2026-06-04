@@ -13,6 +13,10 @@ import {
   PYTHON_EXECUTABLE,
   RUN_TIMEOUT_MS,
 } from "@/lib/code-runner/limits";
+import {
+  CODE_RUNNER_LOCAL_DEV_ONLY_MESSAGE,
+  isLocalDevCodeRunnerAllowed,
+} from "@/lib/code-runner/mode";
 import { createCodeRunResult, truncateOutput } from "@/lib/code-runner/results";
 import {
   buildPythonFreeRunHarnessSource,
@@ -31,14 +35,6 @@ type HarnessPayload = {
   errorMessage?: string;
   testResults?: TestExecutionResult[];
 };
-
-function localExecutionAllowed(): boolean {
-  // The local Python runner is a development-only MVP path. Production must use
-  // a real sandbox boundary: container or microVM per run, no network egress,
-  // read-only runtime image, memory/CPU/process limits, secret-free env, and a
-  // disposable filesystem. Do not expose this unsandboxed path publicly.
-  return process.env.NODE_ENV !== "production";
-}
 
 function collectLimitedOutput(current: string, chunk: Buffer): string {
   const next = current + chunk.toString("utf8");
@@ -64,11 +60,10 @@ function sanitizeRunnerErrorMessage(error: Error): string {
 export async function runPythonCode(
   request: ValidatedCodeRunRequest,
 ): Promise<CodeRunResult> {
-  if (!localExecutionAllowed()) {
+  if (!isLocalDevCodeRunnerAllowed()) {
     return createCodeRunResult({
       status: "ValidationError",
-      errorMessage:
-        "Local Python execution is disabled in production until a real sandbox executor is configured.",
+      errorMessage: CODE_RUNNER_LOCAL_DEV_ONLY_MESSAGE,
     });
   }
 

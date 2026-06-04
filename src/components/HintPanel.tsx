@@ -9,9 +9,10 @@ import type { Problem } from "@/lib/types";
 
 type HintPanelProps = {
   problem: Problem;
+  enabled?: boolean;
 };
 
-export default function HintPanel({ problem }: HintPanelProps) {
+export default function HintPanel({ problem, enabled = true }: HintPanelProps) {
   const [hints, setHints] = useState<AIHintOutput | null>(null);
   const [revealedCount, setRevealedCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -64,6 +65,23 @@ export default function HintPanel({ problem }: HintPanelProps) {
         : revealedCount === 5
           ? "Ladder complete"
           : "In progress";
+
+  if (!enabled) {
+    return (
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+          Hint Mode
+        </p>
+        <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">
+          AI hints are unavailable
+        </h2>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+          Hint Mode is turned off for this beta environment. You can continue
+          with recognition clues and the normal practice flow.
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

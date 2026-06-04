@@ -36,6 +36,9 @@ type CodeWorkspaceProps = {
   problem: WorkspaceProblem;
   context: WorkspaceContext;
   runnerConfigured: boolean;
+  codeRunnerEnabled?: boolean;
+  codeRunnerUnavailableMessage?: string;
+  aiCoachEnabled?: boolean;
   initialCode?: string;
   initialHistory: WorkspaceSubmissionHistoryItem[];
   initialTestCases: WorkspaceTestCaseItem[];
@@ -136,6 +139,9 @@ export default function CodeWorkspace({
   problem,
   context,
   runnerConfigured,
+  codeRunnerEnabled = true,
+  codeRunnerUnavailableMessage = "Code execution is temporarily unavailable. You can still edit and save code.",
+  aiCoachEnabled = true,
   initialCode,
   initialHistory,
   initialTestCases,
@@ -195,6 +201,11 @@ export default function CodeWorkspace({
     }
 
     setMessage("");
+
+    if (!codeRunnerEnabled) {
+      setMessage(codeRunnerUnavailableMessage);
+      return;
+    }
 
     const parsedTests: ReturnType<typeof parseTests> = runnerConfigured
       ? parseTests(testCases, selectedOnly)
@@ -348,10 +359,16 @@ export default function CodeWorkspace({
 
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <LanguageSelector />
+            {!codeRunnerEnabled ? (
+              <p className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-bold leading-6 text-amber-800">
+                {codeRunnerUnavailableMessage}
+              </p>
+            ) : null}
             <div className="mt-5 flex flex-col gap-3">
               <RunButton
                 isRunning={isRunning}
                 structuredRunnerAvailable={runnerConfigured}
+                executionAvailable={codeRunnerEnabled}
                 onRun={() => runCode(true)}
               />
               <button
@@ -381,6 +398,7 @@ export default function CodeWorkspace({
             codeRunId={runState?.codeRunId ?? null}
             runStatus={runState?.result.status ?? null}
             initialInsight={initialDebugInsight}
+            enabled={aiCoachEnabled}
             onInsightCreated={onDebugInsightChange}
           />
         </aside>
@@ -397,6 +415,7 @@ export default function CodeWorkspace({
             isSaving={isSavingTests}
             isRunning={isRunning}
             disabled={!runnerConfigured}
+            executionDisabled={!codeRunnerEnabled}
             fallbackMessage={STRUCTURED_RUNNER_NOT_CONFIGURED_MESSAGE}
           />
           <RunResultsPanel

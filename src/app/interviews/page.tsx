@@ -1,6 +1,7 @@
 import { SignInButton } from "@clerk/nextjs";
 import Link from "next/link";
 
+import FeatureUnavailable from "@/components/FeatureUnavailable";
 import MasteryBadge from "@/components/MasteryBadge";
 import ProgressBar from "@/components/ProgressBar";
 import { patterns } from "@/data/patterns";
@@ -10,6 +11,7 @@ import type {
   RubricCategory,
 } from "@/generated/prisma/enums";
 import { getMasteryLevel, getMasteryLevelNumber } from "@/lib/mastery";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import { getCurrentUserProgressSnapshot } from "@/lib/progress-db";
 import type { PatternProgress } from "@/lib/types";
@@ -342,6 +344,16 @@ async function getInterviewDashboardData(userProfileId: string) {
 export default async function InterviewsPage({
   searchParams,
 }: InterviewsPageProps) {
+  if (!getFeatureFlag("interviews")) {
+    return (
+      <FeatureUnavailable
+        eyebrow="Interview Mode"
+        title="Interview Mode is unavailable"
+        description="Mock interviews are turned off for this beta environment. You can still practice patterns, use reviews, and continue Daily Forge."
+      />
+    );
+  }
+
   const [userProfile, resolvedSearchParams] = await Promise.all([
     ensureCurrentUserProfile(),
     searchParams,
@@ -402,6 +414,8 @@ export default async function InterviewsPage({
         <p className="mt-5 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">
           {error === "signin"
             ? "Sign in before starting an interview."
+            : error === "disabled"
+              ? "Interview Mode is temporarily unavailable."
             : "Could not start that interview. Check the problem bank and try again."}
         </p>
       ) : null}

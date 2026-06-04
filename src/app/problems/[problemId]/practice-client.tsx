@@ -31,6 +31,9 @@ type ProblemPracticeClientProps = {
   problem: Problem;
   patterns: Pattern[];
   runnerConfigured: boolean;
+  codeRunnerEnabled: boolean;
+  codeRunnerUnavailableMessage?: string;
+  aiCoachEnabled: boolean;
   initialHistory: WorkspaceSubmissionHistoryItem[];
   initialTestCases: WorkspaceTestCaseItem[];
   initialDebugInsight: DebugInsightView | null;
@@ -47,6 +50,9 @@ export default function ProblemPracticeClient({
   problem,
   patterns,
   runnerConfigured,
+  codeRunnerEnabled,
+  codeRunnerUnavailableMessage,
+  aiCoachEnabled,
   initialHistory,
   initialTestCases,
   initialDebugInsight,
@@ -204,7 +210,7 @@ export default function ProblemPracticeClient({
           ) : null}
 
           {step === "preview" || step === "quiz" ? (
-            <HintPanel problem={problem} />
+            <HintPanel problem={problem} enabled={aiCoachEnabled} />
           ) : null}
 
           {step === "workspace" ? (
@@ -241,6 +247,9 @@ export default function ProblemPracticeClient({
                   returnLabel: "Back to Practice",
                 }}
                 runnerConfigured={runnerConfigured}
+                codeRunnerEnabled={codeRunnerEnabled}
+                codeRunnerUnavailableMessage={codeRunnerUnavailableMessage}
+                aiCoachEnabled={aiCoachEnabled}
                 initialHistory={initialHistory}
                 initialTestCases={initialTestCases}
                 initialDebugInsight={initialDebugInsight}
@@ -281,6 +290,7 @@ export default function ProblemPracticeClient({
                 <AIReviewPanel
                   attempt={savedAttempt}
                   hasLinkedWorkspaceCode={Boolean(codeSubmissionId)}
+                  enabled={aiCoachEnabled}
                 />
               </div>
             </>

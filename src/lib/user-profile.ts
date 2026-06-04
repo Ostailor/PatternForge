@@ -23,7 +23,7 @@ export async function ensureCurrentUserProfile() {
     user?.primaryEmailAddress?.emailAddress ??
     "PatternForge User";
 
-  return prisma.userProfile.upsert({
+  const userProfile = await prisma.userProfile.upsert({
     where: { authUserId },
     update: {},
     create: {
@@ -31,4 +31,23 @@ export async function ensureCurrentUserProfile() {
       displayName,
     },
   });
+
+  await Promise.all([
+    prisma.userSettings.upsert({
+      where: { userProfileId: userProfile.id },
+      update: {},
+      create: {
+        userProfileId: userProfile.id,
+      },
+    }),
+    prisma.onboardingState.upsert({
+      where: { userProfileId: userProfile.id },
+      update: {},
+      create: {
+        userProfileId: userProfile.id,
+      },
+    }),
+  ]);
+
+  return userProfile;
 }

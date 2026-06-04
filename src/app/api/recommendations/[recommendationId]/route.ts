@@ -4,6 +4,9 @@ import {
   RecommendationFeedbackType,
   type RecommendationFeedbackType as RecommendationFeedbackTypeValue,
 } from "@/generated/prisma/enums";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import {
   createRecommendationFeedback,
   markRecommendationAccepted,
@@ -35,6 +38,13 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<unknown> },
 ) {
+  if (!getFeatureFlag("recommendations")) {
+    return NextResponse.json(
+      { error: "Recommendations are temporarily unavailable." },
+      { status: 503 },
+    );
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
@@ -55,6 +65,17 @@ export async function PATCH(
         userProfile.id,
         recommendationId,
       );
+
+      if (result.status === "updated") {
+        await trackEvent({
+          eventName: AnalyticsEvents.RecommendationAccepted,
+          userProfileId: userProfile.id,
+          properties: {
+            recommendationId,
+            action: "accept",
+          },
+        });
+      }
 
       return NextResponse.json(result, {
         status: result.status === "updated" ? 200 : 404,
@@ -78,6 +99,18 @@ export async function PATCH(
         body.note,
       );
 
+      if (result.status === "recorded") {
+        await trackEvent({
+          eventName: AnalyticsEvents.RecommendationDismissed,
+          userProfileId: userProfile.id,
+          properties: {
+            recommendationId,
+            action: "dismiss",
+            feedbackType: "Dismissed",
+          },
+        });
+      }
+
       return NextResponse.json(result, {
         status: result.status === "recorded" ? 200 : 404,
       });
@@ -96,6 +129,17 @@ export async function PATCH(
         body.feedbackType as RecommendationFeedbackTypeValue,
         body.note,
       );
+
+      if (result.status === "recorded") {
+        await trackEvent({
+          eventName: AnalyticsEvents.FeedbackSubmitted,
+          userProfileId: userProfile.id,
+          properties: {
+            recommendationId,
+            feedbackType: body.feedbackType,
+          },
+        });
+      }
 
       return NextResponse.json(result, {
         status: result.status === "recorded" ? 200 : 404,

@@ -36,6 +36,9 @@ type BattleRoundClientProps = {
   patterns: Pattern[];
   isFinalRound: boolean;
   workspaceData: BattleWorkspaceData;
+  codeRunnerEnabled: boolean;
+  codeRunnerUnavailableMessage?: string;
+  aiCoachEnabled: boolean;
 };
 
 const difficultyStyles: Record<Problem["difficulty"], string> = {
@@ -51,6 +54,9 @@ export default function BattleRoundClient({
   patterns,
   isFinalRound,
   workspaceData,
+  codeRunnerEnabled,
+  codeRunnerUnavailableMessage,
+  aiCoachEnabled,
 }: BattleRoundClientProps) {
   const [step, setStep] = useState<BattleRoundStep>("preview");
   const [selectedPatternId, setSelectedPatternId] = useState("");
@@ -121,6 +127,9 @@ export default function BattleRoundClient({
               returnLabel: "Back to Battle",
             }}
             runnerConfigured={workspaceData.runnerConfigured}
+            codeRunnerEnabled={codeRunnerEnabled}
+            codeRunnerUnavailableMessage={codeRunnerUnavailableMessage}
+            aiCoachEnabled={aiCoachEnabled}
             initialHistory={workspaceData.initialHistory}
             initialTestCases={workspaceData.initialTestCases}
             initialDebugInsight={workspaceData.initialDebugInsight}
@@ -161,6 +170,7 @@ export default function BattleRoundClient({
             <AIReviewPanel
               attempt={savedAttempt}
               hasLinkedWorkspaceCode={Boolean(codeSubmissionId)}
+              enabled={aiCoachEnabled}
             />
           </div>
           {!isFinalRound ? (

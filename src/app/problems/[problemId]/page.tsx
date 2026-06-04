@@ -8,7 +8,12 @@ import type {
 import { TestCaseSource } from "@/generated/prisma/client";
 import { patterns } from "@/data/patterns";
 import { getProblemById, problems } from "@/data/problems";
+import {
+  getCodeExecutionUnavailableMessage,
+  isCodeExecutionAvailable,
+} from "@/lib/code-runner/executor";
 import { getRunnerConfig } from "@/lib/code-runner/runnerConfig";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 import ProblemPracticeClient from "./practice-client";
@@ -200,12 +205,22 @@ export default async function ProblemDetailPage({
           })
         : Promise.resolve(null),
     ]);
+  const codeRunnerEnabled =
+    getFeatureFlag("codeRunner") && isCodeExecutionAvailable();
+  const codeRunnerUnavailableMessage =
+    getFeatureFlag("codeRunner")
+      ? getCodeExecutionUnavailableMessage()
+      : "Code execution is temporarily unavailable.";
+  const aiCoachEnabled = getFeatureFlag("aiCoach");
 
   return (
     <ProblemPracticeClient
       problem={problem}
       patterns={patterns}
       runnerConfigured={Boolean(runnerConfig)}
+      codeRunnerEnabled={codeRunnerEnabled}
+      codeRunnerUnavailableMessage={codeRunnerUnavailableMessage ?? undefined}
+      aiCoachEnabled={aiCoachEnabled}
       initialHistory={history}
       initialTestCases={testCases}
       initialDebugInsight={latestDebugInsight}

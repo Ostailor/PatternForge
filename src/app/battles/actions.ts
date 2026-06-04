@@ -8,7 +8,10 @@ import {
   generatePatternBoss,
   generateReviewGauntlet,
 } from "@/lib/battles/generateBattle";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
 import { canStartPatternBoss } from "@/lib/battles/dashboard";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { getPrisma } from "@/lib/prisma";
 import { ensureCurrentUserProfile } from "@/lib/user-profile";
 
@@ -61,6 +64,10 @@ async function getPatternProblemCount(patternId: string) {
 }
 
 export async function startPatternBossAction(formData: FormData) {
+  if (!getFeatureFlag("bossBattles")) {
+    battleRedirect({ error: "disabled" });
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
@@ -83,6 +90,17 @@ export async function startPatternBossAction(formData: FormData) {
   try {
     const battle = await generatePatternBoss(userProfile.id, requestedPatternId);
 
+    await trackEvent({
+      eventName: AnalyticsEvents.BattleStarted,
+      userProfileId: userProfile.id,
+      properties: {
+        battleId: battle.id,
+        battleType: battle.battleType,
+        targetPatternId: requestedPatternId,
+        totalRounds: battle.totalRounds,
+      },
+    });
+
     revalidatePath("/battles");
     redirectToBattle(battle.id);
   } catch {
@@ -91,6 +109,10 @@ export async function startPatternBossAction(formData: FormData) {
 }
 
 export async function startMixedBattleAction() {
+  if (!getFeatureFlag("bossBattles")) {
+    battleRedirect({ error: "disabled" });
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
@@ -106,6 +128,16 @@ export async function startMixedBattleAction() {
   try {
     const battle = await generateMixedBattle(userProfile.id);
 
+    await trackEvent({
+      eventName: AnalyticsEvents.BattleStarted,
+      userProfileId: userProfile.id,
+      properties: {
+        battleId: battle.id,
+        battleType: battle.battleType,
+        totalRounds: battle.totalRounds,
+      },
+    });
+
     revalidatePath("/battles");
     redirectToBattle(battle.id);
   } catch {
@@ -114,6 +146,10 @@ export async function startMixedBattleAction() {
 }
 
 export async function startReviewGauntletAction() {
+  if (!getFeatureFlag("bossBattles")) {
+    battleRedirect({ error: "disabled" });
+  }
+
   const userProfile = await ensureCurrentUserProfile();
 
   if (!userProfile) {
@@ -128,6 +164,16 @@ export async function startReviewGauntletAction() {
 
   try {
     const battle = await generateReviewGauntlet(userProfile.id);
+
+    await trackEvent({
+      eventName: AnalyticsEvents.BattleStarted,
+      userProfileId: userProfile.id,
+      properties: {
+        battleId: battle.id,
+        battleType: battle.battleType,
+        totalRounds: battle.totalRounds,
+      },
+    });
 
     revalidatePath("/battles");
     redirectToBattle(battle.id);

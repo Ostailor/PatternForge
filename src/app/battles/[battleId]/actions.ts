@@ -5,8 +5,11 @@ import { redirect } from "next/navigation";
 
 import { GameEventType } from "@/generated/prisma/enums";
 import { checkAchievementsWithClient } from "@/lib/achievements/service";
+import { AnalyticsEvents } from "@/lib/analytics-events/events";
+import { trackEvent } from "@/lib/analytics-events/trackEvent";
 import { checkBattleQuestsAndAchievements } from "@/lib/battles/rewards";
 import { scoreBattle } from "@/lib/battles/scoreBattle";
+import { getFeatureFlag } from "@/lib/feature-flags/getFeatureFlag";
 import { createGameEventWithClient } from "@/lib/game/events";
 import { getPrisma } from "@/lib/prisma";
 import {
@@ -109,6 +112,13 @@ function getBattleRoundExecutionScore(round: {
 export async function saveBattleRoundAttemptAction(
   input: SaveBattleRoundAttemptInput,
 ): Promise<SaveBattleRoundAttemptResult> {
+  if (!getFeatureFlag("bossBattles")) {
+    return {
+      status: "invalid",
+      message: "Boss Battles are temporarily unavailable.",
+    };
+  }
+
   const validationError = validateBattleRoundAttemptInput(input);
 
   if (validationError) {
@@ -319,6 +329,23 @@ export async function saveBattleRoundAttemptAction(
               executionBonusXp: score.executionBonusXp,
             },
           );
+          await trackEvent({
+            client: tx,
+            eventName: AnalyticsEvents.BattleCompleted,
+            userProfileId: userProfile.id,
+            properties: {
+              battleId: input.battleId,
+              battleType: round.battle.battleType,
+              targetPatternId: round.battle.targetPatternId ?? undefined,
+              result: score.result,
+              xpEarned: score.xpEarned,
+              recognitionAccuracy: score.recognitionAccuracy,
+              correctRecognitionCount: score.correctRecognitionCount,
+              solvedRoundCount: score.solvedRoundCount,
+              partiallySolvedRoundCount: score.partiallySolvedRoundCount,
+              totalRounds: completedRounds.length,
+            },
+          });
           await updateQuestProgress(tx, userProfile.id, {
             eventType: "BattleCompleted",
             battleId: input.battleId,
